@@ -12,6 +12,7 @@ from scissorhands.prompting.contract import (
 )
 
 WORK_ITEM = WorkItem(
+    id="WORK-ITEM",
     title="Build the thing",
     description="Build the requested thing.",
     definition_of_done=("Tests pass.",),

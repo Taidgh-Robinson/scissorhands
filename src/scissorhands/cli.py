@@ -76,9 +76,16 @@ def main(argv: list[str] | None = None) -> int:
             DEFAULT_COMPLETION_MARKER,
             max_iterations=args.max_iterations,
             contract=contract,
+            progress_path=f".scissorhands/{work_item.id}/run-DRY-RUN/loop-0001/progress.md",
+            status_path=f".scissorhands/{work_item.id}/run-DRY-RUN/loop-0001/status.json",
         )
         preview_final = (
-            root / ".scissorhands" / "runs" / "DRY-RUN" / "iteration-1.final.txt"
+            root
+            / ".scissorhands"
+            / work_item.id
+            / "run-DRY-RUN"
+            / "loop-0001"
+            / "iteration-1.final.txt"
         )
         command = adapter.command(
             executable=resolved,
@@ -105,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
             max_iterations=args.max_iterations,
             model=args.model,
             auto_approve=args.auto_approve,
+            work_item_path=work_item_path,
         )
     )
     if result.completed:

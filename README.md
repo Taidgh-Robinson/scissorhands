@@ -20,18 +20,25 @@ uv run scissorhands --agent codex --work-item WORK_ITEM.toml --max-iterations 5
 uv run scissorhands --agent opencode --work-item WORK_ITEM.toml --max-iterations 5
 ```
 
-Each iteration starts a new agent session. Runtime state is written beneath `.scissorhands/`:
+Each iteration starts a new agent session. Each invocation gets the next numbered run under
+`.scissorhands/<work-item-id>/run-0001/`, with one `loop-0001/` folder per iteration:
 
-- `.scissorhands/progress.md` is the agents' durable handoff note.
-- `.scissorhands/status.json` is the agent's met/unmet assessment of each checklist item, with evidence.
+- `work-item.json` and `work-item.toml` preserve the work item; `run.json` records the agent,
+  model, approval setting, and iteration limit.
+- `loop-0001/progress.md` is the agent's durable handoff note. The next loop gets a copy.
+- `loop-0001/status.json` is the agent's met/unmet assessment of each checklist item, with evidence.
   The harness prints it as a checklist after every iteration. A completion marker is accepted only
   when the file was updated during that iteration and every definition-of-done and acceptance-
   criteria entry is present with `met` set to `true` and non-empty evidence.
-- `.scissorhands/runs/<run-id>/iteration-N.log` contains the combined command output.
-- Codex also writes its final response to `iteration-N.final.txt`.
-- `.scissorhands/runs/<run-id>/iteration-N.json` is the harness-owned receipt for that iteration. It
+- `loop-0001/prompt.md` saves the exact prompt; `iteration-1.log` saves combined agent output.
+- Codex also writes its final response to `iteration-1.final.txt`.
+- `loop-0001/iteration-1.json` is the harness-owned receipt for that iteration. It
   preserves the progress text and criteria snapshot, whether each was updated, verification
-  results, the completion decision, and the iteration outcome.
+  results, the completion decision, and the iteration outcome. Verification command output is
+  saved separately as `verification-N.log`.
+- `loop-0001/iteration-1.md` and the run's `report.md` and `report.json` summarize the outcome.
+
+New runs start with clean agent state. An interrupted run retains its folder and number.
 
 The loop stops when the agent puts `<promise>COMPLETE</promise>` on a line by itself and submits a
 fresh, fully-met criteria status, when an agent command fails, or when the iteration limit is
@@ -78,7 +85,7 @@ uv run scissorhands --agent opencode --model provider/model --work-item WORK_ITE
 
 ## Writing a useful work item
 
-Describe the work in `WORK_ITEM.toml` using the required `title`, `description`,
+Describe the work in `WORK_ITEM.toml` using the required stable `id`, `title`, `description`,
 `definition_of_done`, and `acceptance_criteria` fields. These optional arrays shape the work
 further:
 
@@ -114,10 +121,13 @@ The template uses Python `string.Template` placeholders:
 - `$final_iteration_note`: the wrap-up instructions on the last iteration, empty otherwise.
 - `$verification_feedback`: failing verification output from the previous iteration, empty
   otherwise.
+- `$progress_path` and `$status_path`: paths to the current loop's agent-written state.
 
 Unknown placeholders are rejected at startup. Write a literal `$` as `$$`.
+Custom contracts with hard-coded `.scissorhands/progress.md` or `.scissorhands/status.json` paths
+should replace them with `$progress_path` and `$status_path`.
 
-Start with two or three iterations and inspect `.scissorhands/progress.md`, the run logs, and the Git diff.
+Start with two or three iterations and inspect the run report, loop progress notes, and the Git diff.
 Small limits make it much easier to learn how prompt wording affects convergence.
 
 ## Project layout

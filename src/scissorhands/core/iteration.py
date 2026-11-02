@@ -41,6 +41,7 @@ class IterationRecord:
     verification_required: bool
     marker_claimed: bool
     final_iteration: bool
+    elapsed_seconds: float | None = None
 
     @property
     def decision(self) -> CompletionDecision:
