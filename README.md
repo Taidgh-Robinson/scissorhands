@@ -1,7 +1,8 @@
 # Scissorhands
 
-A deliberately small Python harness for running bounded, fresh-context coding-agent loops with either
-[Codex](https://developers.openai.com/codex/) or [OpenCode](https://opencode.ai/).
+A deliberately small Python harness for running bounded, fresh-context coding-agent loops with
+[Claude Code](https://code.claude.com/), [Codex](https://developers.openai.com/codex/), or
+[OpenCode](https://opencode.ai/).
 
 Here, an **agent loop** means: give a coding agent the same goal repeatedly, let each fresh run
 inspect the work left by previous runs, and stop when the agent emits an explicit completion
@@ -14,6 +15,7 @@ uv sync
 uv run python -m unittest discover -s tests -v
 
 # Edit WORK_ITEM.toml first, then choose an agent:
+uv run scissorhands --agent claude --work-item WORK_ITEM.toml --max-iterations 5
 uv run scissorhands --agent codex --work-item WORK_ITEM.toml --max-iterations 5
 uv run scissorhands --agent opencode --work-item WORK_ITEM.toml --max-iterations 5
 ```
@@ -45,15 +47,18 @@ the fresh session starts from the real failure.
 The defaults are intentionally conservative:
 
 - Codex runs with `--sandbox workspace-write`.
-- OpenCode uses its configured permission policy.
-- Neither backend receives an automatic-approval flag unless you pass `--auto-approve`.
+- Claude Code and OpenCode use their configured permission policies. Claude Code runs in `--print`
+  mode, where any tool call your settings do not already allow is denied rather than prompted, so
+  allow the edit and test commands you expect in `.claude/settings.json` before a run.
+- No backend receives an automatic-approval flag unless you pass `--auto-approve`.
 - Every run must have a positive `--max-iterations` value.
 - `verification` commands run through your shell in the repository root, outside the agent's
   sandbox, because they come from your work item. They are read once at startup, so an agent
   editing `WORK_ITEM.toml` mid-run cannot change what the harness executes. They do run code the
   agent wrote (your tests), just as running the tests yourself would.
 
-`--auto-approve` maps to `codex exec --approve-for-me` and `opencode run --auto`. OpenCode labels
+`--auto-approve` maps to `codex exec --approve-for-me`, `claude --permission-mode auto`, and
+`opencode run --auto`. The harness never passes Claude Code's `bypassPermissions` mode. OpenCode labels
 its flag dangerous, so use it only inside a repository you trust and review your agent/tool
 configuration first.
 
@@ -66,6 +71,7 @@ uv run scissorhands --agent opencode --work-item WORK_ITEM.toml --dry-run
 Models are backend-specific and optional:
 
 ```bash
+uv run scissorhands --agent claude --model sonnet --work-item WORK_ITEM.toml
 uv run scissorhands --agent codex --model YOUR_CODEX_MODEL --work-item WORK_ITEM.toml
 uv run scissorhands --agent opencode --model provider/model --work-item WORK_ITEM.toml
 ```

@@ -104,7 +104,38 @@ class OpenCodeAdapter:
         return log.read_text(encoding="utf-8")
 
 
+@dataclass(frozen=True, slots=True)
+class ClaudeCodeAdapter:
+    """Build Claude Code print-mode commands and read their final response."""
+
+    name: str = "claude"
+    uses_stdin: bool = True
+
+    def command(
+        self,
+        *,
+        executable: str,
+        root: Path,
+        final_message: Path,
+        model: str | None,
+        auto_approve: bool,
+        prompt: str,
+    ) -> list[str]:
+        del root, final_message, prompt
+        command = [executable, "--print", "--output-format", "text"]
+        if model:
+            command.extend(["--model", model])
+        if auto_approve:
+            command.extend(["--permission-mode", "auto"])
+        return command
+
+    def completion_output(self, *, log: Path, final_message: Path) -> str:
+        del final_message
+        return log.read_text(encoding="utf-8")
+
+
 ADAPTERS: dict[str, AgentAdapter] = {
+    "claude": ClaudeCodeAdapter(),
     "codex": CodexAdapter(),
     "opencode": OpenCodeAdapter(),
 }

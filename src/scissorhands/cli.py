@@ -17,7 +17,7 @@ from scissorhands.prompting.contract import default_contract, load_contract
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="scissorhands",
-        description="Run a bounded, fresh-session agent loop with Codex or OpenCode.",
+        description="Run a bounded, fresh-session agent loop with Claude Code, Codex, or OpenCode.",
     )
     parser.add_argument("--agent", choices=sorted(ADAPTERS), default="codex")
     parser.add_argument(
