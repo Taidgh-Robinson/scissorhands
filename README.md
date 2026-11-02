@@ -31,6 +31,11 @@ Each iteration starts a new agent session. Each invocation gets the next numbere
   when the file was updated during that iteration and every definition-of-done and acceptance-
   criteria entry is present with `met` set to `true` and non-empty evidence.
 - `loop-0001/prompt.md` saves the exact prompt; `iteration-1.log` saves combined agent output.
+- `loop-0001/changes.patch` saves the Git diff produced during that loop, including staged edits
+  and non-ignored new files. It is empty when no code changed. The harness leaves your Git index
+  untouched.
+- `run-0001/changes.patch` saves the cumulative Git diff from before the first loop through
+  the end of the run.
 - Codex also writes its final response to `iteration-1.final.txt`.
 - `loop-0001/iteration-1.json` is the harness-owned receipt for that iteration. It
   preserves the progress text and criteria snapshot, whether each was updated, verification

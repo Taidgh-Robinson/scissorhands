@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
@@ -13,6 +14,7 @@ from pathlib import Path
 from time import perf_counter
 
 from scissorhands.agents import AgentAdapter
+from scissorhands.core.diffs import snapshot_worktree, write_loop_diff
 from scissorhands.core.execution import run_command
 from scissorhands.core.iteration import IterationRecord
 from scissorhands.core.receipts import write_iteration_receipt
@@ -241,6 +243,28 @@ def execute_iteration(
     )
 
 
+def write_final_artifacts(
+    config: LoopConfig,
+    paths: RunPaths,
+    records: list[IterationRecord],
+    start: str | None,
+) -> None:
+    """Save the cumulative patch and run report after the final loop."""
+    if start is not None:
+        try:
+            end = snapshot_worktree(config.root)
+            if end is not None:
+                write_loop_diff(
+                    config.root, start, end, paths.run_dir / "changes.patch"
+                )
+        except (OSError, subprocess.CalledProcessError) as error:
+            print(f"Could not save final Git diff: {error}", file=sys.stderr)
+    try:
+        write_run_report(paths.run_dir, config.work_item, records)
+    except OSError as error:
+        print(f"Could not write run report: {error}", file=sys.stderr)
+
+
 def run_loop(
     config: LoopConfig,
     *,
@@ -253,12 +277,35 @@ def run_loop(
     paths = initialize_run(config)
     feedback: str | None = None
     records: list[IterationRecord] = []
+    start_tree: str | None = None
     for number in range(1, config.max_iterations + 1):
         loop_dir, status, progress = initialize_loop(paths, number)
         prepared = prepare_iteration(config, loop_dir, number, feedback)
+        try:
+            before = snapshot_worktree(config.root)
+        except (OSError, subprocess.CalledProcessError) as error:
+            before = None
+            print(
+                f"Could not capture Git state before loop {number}: {getattr(error, 'stderr', error)}",
+                file=sys.stderr,
+            )
+        if number == 1:
+            start_tree = before
         record = execute_iteration(
             config, prepared, status, progress, invoke=invoke, verify=verify
         )
+        if before is not None:
+            try:
+                after = snapshot_worktree(config.root)
+                if after is not None:
+                    write_loop_diff(
+                        config.root, before, after, loop_dir / "changes.patch"
+                    )
+            except (OSError, subprocess.CalledProcessError) as error:
+                print(
+                    f"Could not save Git diff for loop {number}: {error}",
+                    file=sys.stderr,
+                )
         write_iteration_receipt(loop_dir / f"iteration-{number}.json", record)
         try:
             write_loop_report(
@@ -270,10 +317,7 @@ def run_loop(
         report_iteration(record, prepared.log)
         decision = record.decision
         if decision.accepted or decision.outcome == "agent_failed":
-            try:
-                write_run_report(paths.run_dir, config.work_item, records)
-            except OSError as error:
-                print(f"Could not write run report: {error}", file=sys.stderr)
+            write_final_artifacts(config, paths, records, start_tree)
             return LoopResult(
                 completed=decision.accepted,
                 iterations=number,
@@ -281,10 +325,7 @@ def run_loop(
                 failed=decision.outcome == "agent_failed",
             )
         feedback = record.verification_feedback
-    try:
-        write_run_report(paths.run_dir, config.work_item, records)
-    except OSError as error:
-        print(f"Could not write run report: {error}", file=sys.stderr)
+    write_final_artifacts(config, paths, records, start_tree)
     return LoopResult(
         completed=False,
         iterations=config.max_iterations,

@@ -1,4 +1,5 @@
 import json
+import subprocess
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr, redirect_stdout
@@ -61,6 +62,84 @@ class CompletionMarkerTests(TestCase):
 
 
 class LoopTests(TestCase):
+    def test_each_loop_saves_only_its_git_changes_without_staging_files(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            def git(*args: str) -> str:
+                return subprocess.run(
+                    ["git", "-C", str(root), *args],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout
+
+            git("init", "-q")
+            (root / ".gitignore").write_text(".scissorhands/\n", encoding="utf-8")
+            (root / "code.py").write_text("base\n", encoding="utf-8")
+            (root / "staged.py").write_text("original\n", encoding="utf-8")
+            git("add", ".gitignore", "code.py", "staged.py")
+            git(
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "-qm",
+                "base",
+            )
+            (root / "code.py").write_text("existing edit\n", encoding="utf-8")
+            (root / "staged.py").write_text("already staged\n", encoding="utf-8")
+            git("add", "staged.py")
+            initial_index = git("diff", "--cached")
+            calls = 0
+
+            def invoke(
+                command: list[str], prompt: str | None, log: Path, cwd: Path
+            ) -> int:
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    (root / "code.py").write_text("first loop\n", encoding="utf-8")
+                    (root / "new.py").write_text("new file\n", encoding="utf-8")
+                else:
+                    (root / "code.py").write_text("second loop\n", encoding="utf-8")
+                    (root / "new.py").write_text("changed new file\n", encoding="utf-8")
+                log.write_text("working\n", encoding="utf-8")
+                return 0
+
+            result = run_loop(
+                LoopConfig(root, WORK_ITEM, OpenCodeAdapter(), "opencode", 2),
+                invoke=invoke,
+            )
+            first = (result.run_dir / "loop-0001" / "changes.patch").read_text()
+            second = (result.run_dir / "loop-0002" / "changes.patch").read_text()
+            full = (result.run_dir / "changes.patch").read_text()
+            self.assertIn("-existing edit", first)
+            self.assertIn("+first loop", first)
+            self.assertIn("+new file", first)
+            self.assertNotIn("already staged", first)
+            self.assertIn("-first loop", second)
+            self.assertIn("+second loop", second)
+            self.assertIn("-new file", second)
+            self.assertIn("+changed new file", second)
+            self.assertNotIn("existing edit", second)
+            self.assertNotIn(".scissorhands", first + second)
+            self.assertIn("-existing edit", full)
+            self.assertIn("+second loop", full)
+            self.assertIn("+changed new file", full)
+            self.assertNotIn("+first loop", full)
+            self.assertNotIn(".scissorhands", full)
+            self.assertEqual(git("diff", "--cached"), initial_index)
+            self.assertIn(
+                "[Code changes](changes.patch)",
+                (result.run_dir / "loop-0001" / "iteration-1.md").read_text(),
+            )
+            self.assertIn(
+                "[Full code changes](changes.patch)",
+                (result.run_dir / "report.md").read_text(),
+            )
+
     def test_run_numbers_are_exclusive_and_interrupted_runs_are_retained(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

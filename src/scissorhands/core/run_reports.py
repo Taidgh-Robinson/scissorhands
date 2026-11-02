@@ -108,6 +108,8 @@ def write_loop_report(
     ]
     if (loop_dir / STATUS_FILE).exists():
         lines[-1] += " [Status](status.json)."
+    if (loop_dir / "changes.patch").exists():
+        lines[-1] += " [Code changes](changes.patch)."
     (loop_dir / f"iteration-{number}.md").write_text(
         "\n".join(lines) + "\n", encoding="utf-8"
     )
@@ -212,4 +214,6 @@ def write_run_report(
         "",
         "[Work item snapshot](work-item.json) · [Run settings](run.json) · [Machine-readable report](report.json)",
     ]
+    if (run_dir / "changes.patch").exists():
+        lines[-1] += " · [Full code changes](changes.patch)"
     (run_dir / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
