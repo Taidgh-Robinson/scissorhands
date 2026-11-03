@@ -50,6 +50,14 @@ def snapshot_worktree(root: Path) -> str | None:
         return _git(root, "write-tree", index=index).strip()
 
 
+def head_commit(root: Path) -> str | None:
+    """Return the current commit, or None outside a repository or before its first commit."""
+    try:
+        return _git(root, "rev-parse", "--verify", "HEAD").strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 def write_loop_diff(root: Path, before: str, after: str, path: Path) -> None:
     """Save the patch between two worktree snapshots, including binary changes."""
     patch = _git(root, "diff", "--binary", "--no-ext-diff", "--no-color", before, after)

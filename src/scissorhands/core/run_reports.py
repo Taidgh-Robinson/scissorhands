@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scissorhands.core.iteration import IterationRecord
@@ -115,35 +116,64 @@ def write_loop_report(
     )
 
 
-def write_run_report(
-    run_dir: Path, work_item: WorkItem, records: list[IterationRecord]
-) -> None:
-    """Summarize the completed invocation and retain a small JSON index."""
+def _run_outcome(records: list[IterationRecord]) -> str:
     final = records[-1]
-    outcome = (
+    return (
         final.decision.outcome
         if final.decision.accepted or final.decision.outcome == "agent_failed"
         else "iteration_limit"
     )
+
+
+def write_run_manifest(
+    run_dir: Path,
+    work_item: WorkItem,
+    records: list[IterationRecord],
+    started_at: str,
+    *,
+    finished: bool = False,
+) -> None:
+    """Atomically save the latest known run state, including interrupted runs."""
+    now = datetime.now(UTC).isoformat()
     timeline = [
         {
             "loop": record.iteration,
             "outcome": record.decision.outcome,
             "rejection_reason": record.decision.rejection_reason,
+            "started_at": record.started_at,
+            "finished_at": record.finished_at,
+            "elapsed_seconds": record.elapsed_seconds,
+            "agent_elapsed_seconds": record.agent_elapsed_seconds,
+            "verification_elapsed_seconds": record.verification_elapsed_seconds,
+            "git_before_tree": record.git_before_tree,
+            "git_after_tree": record.git_after_tree,
             "receipt": f"loop-{record.iteration:04d}/iteration-{record.iteration}.json",
             "report": f"loop-{record.iteration:04d}/iteration-{record.iteration}.md",
         }
         for record in records
     ]
     summary = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "run_id": run_dir.name,
         "work_item_id": work_item.id,
-        "outcome": outcome,
+        "state": "finished" if finished else "running",
+        "outcome": _run_outcome(records) if finished else None,
+        "started_at": started_at,
+        "updated_at": now,
+        "finished_at": now if finished else None,
         "loops": timeline,
     }
-    (run_dir / "report.json").write_text(
-        json.dumps(summary, indent=2) + "\n", encoding="utf-8"
-    )
+    temporary = run_dir / "report.json.tmp"
+    temporary.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(run_dir / "report.json")
+
+
+def write_run_report(
+    run_dir: Path, work_item: WorkItem, records: list[IterationRecord]
+) -> None:
+    """Summarize the completed invocation in Markdown."""
+    final = records[-1]
+    outcome = _run_outcome(records)
     lines = [
         f"# {work_item.id}: {work_item.title}",
         "",

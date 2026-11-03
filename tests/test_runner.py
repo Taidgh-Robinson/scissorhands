@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
+from datetime import datetime
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -131,6 +132,30 @@ class LoopTests(TestCase):
             self.assertNotIn("+first loop", full)
             self.assertNotIn(".scissorhands", full)
             self.assertEqual(git("diff", "--cached"), initial_index)
+            self.assertEqual(
+                json.loads((result.run_dir / "run.json").read_text())["git_head"],
+                git("rev-parse", "HEAD").strip(),
+            )
+            first_receipt = json.loads(
+                (result.run_dir / "loop-0001" / "iteration-1.json").read_text()
+            )
+            second_receipt = json.loads(
+                (result.run_dir / "loop-0002" / "iteration-2.json").read_text()
+            )
+            self.assertEqual(
+                git(
+                    "diff",
+                    "--binary",
+                    "--no-ext-diff",
+                    "--no-color",
+                    first_receipt["git_before_tree"],
+                    first_receipt["git_after_tree"],
+                ),
+                first,
+            )
+            self.assertEqual(
+                first_receipt["git_after_tree"], second_receipt["git_before_tree"]
+            )
             self.assertIn(
                 "[Code changes](changes.patch)",
                 (result.run_dir / "loop-0001" / "iteration-1.md").read_text(),
@@ -153,6 +178,38 @@ class LoopTests(TestCase):
                 {"run-0001", "run-0002", "run-0003", "run-0004"},
             )
             self.assertEqual(initialize_run(config).run_dir.name, "run-0005")
+
+    def test_manifest_retains_completed_loops_after_interruption(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = 0
+
+            def invoke(
+                command: list[str], prompt: str | None, log: Path, cwd: Path
+            ) -> int:
+                nonlocal calls
+                calls += 1
+                manifest = json.loads((log.parent.parent / "report.json").read_text())
+                self.assertEqual(manifest["state"], "running")
+                self.assertIsNone(manifest["outcome"])
+                self.assertEqual(len(manifest["loops"]), calls - 1)
+                if calls == 2:
+                    raise KeyboardInterrupt
+                log.write_text("working\n", encoding="utf-8")
+                return 0
+
+            config = LoopConfig(root, WORK_ITEM, OpenCodeAdapter(), "opencode", 3)
+            with self.assertRaises(KeyboardInterrupt):
+                run_loop(config, invoke=invoke)
+            run_dir = root / ".scissorhands" / WORK_ITEM.id / "run-0001"
+            manifest = json.loads((run_dir / "report.json").read_text())
+            self.assertEqual(manifest["schema_version"], 2)
+            self.assertEqual(manifest["run_id"], "run-0001")
+            self.assertEqual(manifest["state"], "running")
+            self.assertIsNone(manifest["finished_at"])
+            self.assertEqual(len(manifest["loops"]), 1)
+            self.assertEqual(manifest["loops"][0]["loop"], 1)
+            self.assertTrue((run_dir / manifest["loops"][0]["receipt"]).is_file())
 
     def test_loop_state_and_reports_are_saved_under_numbered_folders(self) -> None:
         with TemporaryDirectory() as directory:
@@ -212,12 +269,27 @@ class LoopTests(TestCase):
                 ],
                 0,
             )
+            receipt = json.loads((second_loop / "iteration-2.json").read_text())
+            self.assertLessEqual(
+                datetime.fromisoformat(receipt["started_at"]),
+                datetime.fromisoformat(receipt["finished_at"]),
+            )
+            self.assertGreater(receipt["agent_elapsed_seconds"], 0)
+            self.assertIsNone(receipt["verification_elapsed_seconds"])
+            self.assertGreaterEqual(
+                receipt["elapsed_seconds"], receipt["agent_elapsed_seconds"]
+            )
             self.assertTrue((second_loop / "iteration-2.md").exists())
             self.assertIn("iteration_limit", (first.run_dir / "report.md").read_text())
+            manifest = json.loads((first.run_dir / "report.json").read_text())
+            self.assertEqual(manifest["outcome"], "iteration_limit")
+            self.assertEqual(manifest["state"], "finished")
+            self.assertIsNotNone(manifest["finished_at"])
             self.assertEqual(
-                json.loads((first.run_dir / "report.json").read_text())["outcome"],
-                "iteration_limit",
+                manifest["started_at"],
+                json.loads((first.run_dir / "run.json").read_text())["started_at"],
             )
+            self.assertEqual(len(manifest["loops"]), 2)
 
             def fresh_run(
                 command: list[str], prompt: str | None, log: Path, cwd: Path
@@ -408,6 +480,12 @@ class LoopTests(TestCase):
                 )
             )
             self.assertFalse(first_receipt["verification"]["passed"])
+            self.assertGreaterEqual(first_receipt["verification_elapsed_seconds"], 0)
+            self.assertGreaterEqual(
+                first_receipt["elapsed_seconds"],
+                first_receipt["agent_elapsed_seconds"]
+                + first_receipt["verification_elapsed_seconds"],
+            )
             self.assertEqual(
                 first_receipt["verification"]["commands"][0]["return_code"], 1
             )

@@ -42,6 +42,12 @@ class IterationRecord:
     marker_claimed: bool
     final_iteration: bool
     elapsed_seconds: float | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    agent_elapsed_seconds: float | None = None
+    verification_elapsed_seconds: float | None = None
+    git_before_tree: str | None = None
+    git_after_tree: str | None = None
 
     @property
     def decision(self) -> CompletionDecision:

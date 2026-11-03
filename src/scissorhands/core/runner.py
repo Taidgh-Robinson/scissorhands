@@ -8,13 +8,13 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 
 from scissorhands.agents import AgentAdapter
-from scissorhands.core.diffs import snapshot_worktree, write_loop_diff
+from scissorhands.core.diffs import head_commit, snapshot_worktree, write_loop_diff
 from scissorhands.core.execution import run_command
 from scissorhands.core.iteration import IterationRecord
 from scissorhands.core.receipts import write_iteration_receipt
@@ -23,7 +23,11 @@ from scissorhands.core.reporting import (
     report_status,
     report_verification,
 )
-from scissorhands.core.run_reports import write_loop_report, write_run_report
+from scissorhands.core.run_reports import (
+    write_loop_report,
+    write_run_manifest,
+    write_run_report,
+)
 from scissorhands.core.status import STATUS_FILE, read_status
 from scissorhands.core.verification import VerificationResult, run_verification
 from scissorhands.core.work_items import WorkItem, validate_work_item_id
@@ -87,6 +91,7 @@ Verify = Callable[[Sequence[str], Path], VerificationResult]
 @dataclass(frozen=True, slots=True)
 class RunPaths:
     run_dir: Path
+    started_at: str
 
     def loop_dir(self, number: int) -> Path:
         return self.run_dir / f"loop-{number:04d}"
@@ -119,13 +124,15 @@ def initialize_run(config: LoopConfig) -> RunPaths:
             break
         except FileExistsError:
             number += 1
+    started_at = datetime.now(UTC).isoformat()
     (run_dir / "work-item.json").write_text(
         json.dumps(asdict(config.work_item), indent=2) + "\n", encoding="utf-8"
     )
     (run_dir / "run.json").write_text(
         json.dumps(
             {
-                "started_at": datetime.now(UTC).isoformat(),
+                "started_at": started_at,
+                "git_head": head_commit(config.root),
                 "agent": config.adapter.name,
                 "executable": config.executable,
                 "model": config.model,
@@ -139,7 +146,8 @@ def initialize_run(config: LoopConfig) -> RunPaths:
     )
     if config.work_item_path is not None:
         shutil.copyfile(config.work_item_path, run_dir / "work-item.toml")
-    return RunPaths(run_dir)
+    write_run_manifest(run_dir, config.work_item, [], started_at)
+    return RunPaths(run_dir, started_at)
 
 
 def initialize_loop(paths: RunPaths, number: int) -> tuple[Path, Path, Path]:
@@ -206,13 +214,16 @@ def execute_iteration(
     status_before = _modified_ns(status)
     progress_before = _modified_ns(progress)
     stdin_prompt = prepared.prompt if config.adapter.uses_stdin else None
+    started_at = datetime.now(UTC).isoformat()
     started = perf_counter()
     return_code = invoke(prepared.command, stdin_prompt, prepared.log, config.root)
+    agent_elapsed_seconds = perf_counter() - started
     status_updated = _modified_ns(status) != status_before
     progress_updated = _modified_ns(progress) != progress_before
     statuses = read_status(status, config.work_item.checklist())
     claimed = False
     verification = None
+    verification_elapsed_seconds = None
     if return_code == 0:
         report_status(status, statuses, updated=status_updated)
         output = config.adapter.completion_output(
@@ -220,13 +231,16 @@ def execute_iteration(
         )
         claimed = has_completion_marker(output, config.completion_marker)
         if config.work_item.verification:
+            verification_started = perf_counter()
             verification = verify(config.work_item.verification, config.root)
+            verification_elapsed_seconds = perf_counter() - verification_started
             for index, result in enumerate(verification.results, 1):
                 (prepared.log.parent / f"verification-{index}.log").write_text(
                     result.output, encoding="utf-8"
                 )
             report_verification(verification)
     elapsed_seconds = perf_counter() - started
+    finished_at = datetime.now(UTC).isoformat()
     return IterationRecord(
         iteration=prepared.number,
         agent=config.adapter.name,
@@ -240,6 +254,10 @@ def execute_iteration(
         marker_claimed=claimed,
         final_iteration=prepared.number == config.max_iterations,
         elapsed_seconds=elapsed_seconds,
+        started_at=started_at,
+        finished_at=finished_at,
+        agent_elapsed_seconds=agent_elapsed_seconds,
+        verification_elapsed_seconds=verification_elapsed_seconds,
     )
 
 
@@ -260,6 +278,9 @@ def write_final_artifacts(
         except (OSError, subprocess.CalledProcessError) as error:
             print(f"Could not save final Git diff: {error}", file=sys.stderr)
     try:
+        write_run_manifest(
+            paths.run_dir, config.work_item, records, paths.started_at, finished=True
+        )
         write_run_report(paths.run_dir, config.work_item, records)
     except OSError as error:
         print(f"Could not write run report: {error}", file=sys.stderr)
@@ -294,6 +315,7 @@ def run_loop(
         record = execute_iteration(
             config, prepared, status, progress, invoke=invoke, verify=verify
         )
+        after = None
         if before is not None:
             try:
                 after = snapshot_worktree(config.root)
@@ -306,6 +328,7 @@ def run_loop(
                     f"Could not save Git diff for loop {number}: {error}",
                     file=sys.stderr,
                 )
+        record = replace(record, git_before_tree=before, git_after_tree=after)
         write_iteration_receipt(loop_dir / f"iteration-{number}.json", record)
         try:
             write_loop_report(
@@ -314,6 +337,12 @@ def run_loop(
         except OSError as error:
             print(f"Could not write loop report: {error}", file=sys.stderr)
         records.append(record)
+        try:
+            write_run_manifest(
+                paths.run_dir, config.work_item, records, paths.started_at
+            )
+        except OSError as error:
+            print(f"Could not update run manifest: {error}", file=sys.stderr)
         report_iteration(record, prepared.log)
         decision = record.decision
         if decision.accepted or decision.outcome == "agent_failed":

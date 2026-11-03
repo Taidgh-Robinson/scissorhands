@@ -24,7 +24,7 @@ Each iteration starts a new agent session. Each invocation gets the next numbere
 `.scissorhands/<work-item-id>/run-0001/`, with one `loop-0001/` folder per iteration:
 
 - `work-item.json` and `work-item.toml` preserve the work item; `run.json` records the agent,
-  model, approval setting, and iteration limit.
+  model, approval setting, iteration limit, start time, and starting Git commit.
 - `loop-0001/progress.md` is the agent's durable handoff note. The next loop gets a copy.
 - `loop-0001/status.json` is the agent's met/unmet assessment of each checklist item, with evidence.
   The harness prints it as a checklist after every iteration. A completion marker is accepted only
@@ -39,9 +39,11 @@ Each iteration starts a new agent session. Each invocation gets the next numbere
 - Codex also writes its final response to `iteration-1.final.txt`.
 - `loop-0001/iteration-1.json` is the harness-owned receipt for that iteration. It
   preserves the progress text and criteria snapshot, whether each was updated, verification
-  results, the completion decision, and the iteration outcome. Verification command output is
-  saved separately as `verification-N.log`.
-- `loop-0001/iteration-1.md` and the run's `report.md` and `report.json` summarize the outcome.
+  results, the completion decision, timing, before/after Git tree IDs, and the iteration outcome.
+  Verification command output is saved separately as `verification-N.log`.
+- `loop-0001/iteration-1.md` and the run's `report.md` summarize the outcome. The run's
+  `report.json` is created at startup and updated after each completed loop, so an interrupted
+  run retains a machine-readable record of its last completed loop.
 
 New runs start with clean agent state. An interrupted run retains its folder and number.
 
