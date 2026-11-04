@@ -12,14 +12,16 @@ def compose_prompt(
     max_iterations: int,
     verification_feedback: str | None = None,
     contract: str | None = None,
+    progress_path: str = ".scissorhands/progress.md",
+    status_path: str = ".scissorhands/status.json",
 ) -> str:
     """Add the repeatable loop contract to the user's task."""
     final_note = ""
     if iteration == max_iterations:
-        final_note = """
+        final_note = f"""
 This is the final iteration. Do not start large new pieces of work. Finish or safely wrap up what
 is in progress, leave the repository in a working state, and make
-`.scissorhands/progress.md` a clear handoff for whoever picks this up next.
+`{progress_path}` a clear handoff for whoever picks this up next.
 """
     feedback = ""
     if verification_feedback:
@@ -38,5 +40,7 @@ failures before starting anything else:
         marker=marker,
         final_iteration_note=final_note,
         verification_feedback=feedback,
+        progress_path=progress_path,
+        status_path=status_path,
     )
     return f"{work_item.as_prompt()}\n{rendered}"

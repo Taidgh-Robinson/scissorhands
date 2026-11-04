@@ -4,14 +4,10 @@ from __future__ import annotations
 
 import argparse
 import shlex
-import shutil
 from pathlib import Path
 
-from scissorhands.agents import ADAPTERS, get_adapter
-from scissorhands.core.runner import DEFAULT_COMPLETION_MARKER, LoopConfig, run_loop
-from scissorhands.core.work_items import load_work_item
-from scissorhands.prompting.compose import compose_prompt
-from scissorhands.prompting.contract import default_contract, load_contract
+from scissorhands.agents import ADAPTERS
+from scissorhands.core.run_service import RunRequest, RunService
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -47,66 +43,36 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    root = Path.cwd().resolve()
-    work_item_path = (
-        args.work_item if args.work_item.is_absolute() else root / args.work_item
+    service = RunService(Path.cwd())
+    request = RunRequest(
+        work_item_path=args.work_item,
+        agent=args.agent,
+        max_iterations=args.max_iterations,
+        model=args.model,
+        executable=args.executable,
+        auto_approve=args.auto_approve,
+        contract_path=args.contract,
     )
-
-    if args.max_iterations < 1:
-        raise SystemExit("--max-iterations must be at least 1")
-    if not work_item_path.is_file():
-        raise SystemExit(f"Work item does not exist: {work_item_path}")
-
-    executable = args.executable or args.agent
-    resolved = shutil.which(executable)
-    if resolved is None:
-        raise SystemExit(f"Agent executable not found: {executable}")
-
-    adapter = get_adapter(args.agent)
     try:
-        work_item = load_work_item(work_item_path)
-        contract = load_contract(args.contract) if args.contract else default_contract()
+        if args.dry_run:
+            preview = service.preview(request)
+        else:
+            result = service.run(request)
     except ValueError as error:
         raise SystemExit(str(error)) from error
 
     if args.dry_run:
-        prompt = compose_prompt(
-            work_item,
-            1,
-            DEFAULT_COMPLETION_MARKER,
-            max_iterations=args.max_iterations,
-            contract=contract,
-        )
-        preview_final = (
-            root / ".scissorhands" / "runs" / "DRY-RUN" / "iteration-1.final.txt"
-        )
-        command = adapter.command(
-            executable=resolved,
-            root=root,
-            final_message=preview_final,
-            model=args.model,
-            auto_approve=args.auto_approve,
-            prompt=prompt,
-        )
         print("Command:")
-        display_command = command if adapter.uses_stdin else [*command[:-1], "<PROMPT>"]
+        display_command = (
+            preview.command
+            if preview.uses_stdin
+            else (*preview.command[:-1], "<PROMPT>")
+        )
         print(shlex.join(display_command))
         print("\nPrompt:\n")
-        print(prompt)
+        print(preview.prompt)
         return 0
 
-    result = run_loop(
-        LoopConfig(
-            root=root,
-            work_item=work_item,
-            contract=contract,
-            adapter=adapter,
-            executable=resolved,
-            max_iterations=args.max_iterations,
-            model=args.model,
-            auto_approve=args.auto_approve,
-        )
-    )
     if result.completed:
         print(
             f"\nScissorhands completed after {result.iterations} iteration(s). "

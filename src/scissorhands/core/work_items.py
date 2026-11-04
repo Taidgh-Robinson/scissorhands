@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,7 @@ from pathlib import Path
 class WorkItem:
     """A Jira-style unit of work for a Scissorhands loop."""
 
+    id: str
     title: str
     description: str
     definition_of_done: tuple[str, ...]
@@ -19,6 +21,9 @@ class WorkItem:
     verification: tuple[str, ...] = ()
     relevant_paths: tuple[str, ...] = ()
     non_goals: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        validate_work_item_id(self.id)
 
     def checklist(self) -> tuple[tuple[str, str], ...]:
         """Return stable IDs for every definition of done item and acceptance criterion."""
@@ -53,6 +58,17 @@ class WorkItem:
         if self.verification:
             sections.append(_render_list("Verification", self.verification, code=True))
         return "\n\n".join(sections)
+
+
+def validate_work_item_id(value: str) -> str:
+    """Require one portable directory component for a work item ID."""
+    if not isinstance(value, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_-]*", value
+    ):
+        raise ValueError(
+            "'id' must contain only letters, digits, '-' or '_' and start with a letter or digit"
+        )
+    return value
 
 
 def _numbered(prefix: str, values: tuple[str, ...]) -> tuple[tuple[str, str], ...]:
@@ -99,6 +115,7 @@ def load_work_item(path: Path) -> WorkItem:
         raise ValueError(f"{path}: invalid TOML: {error}") from error
 
     return WorkItem(
+        id=validate_work_item_id(_required_text(data, "id", path)),
         title=_required_text(data, "title", path),
         description=_required_text(data, "description", path),
         definition_of_done=_string_list(
