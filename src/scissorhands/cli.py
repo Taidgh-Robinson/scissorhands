@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import shlex
 from pathlib import Path
 
@@ -57,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.dry_run:
             preview = service.preview(request)
         else:
-            result = service.run(request)
+            result = asyncio.run(service.run(request))
     except ValueError as error:
         raise SystemExit(str(error)) from error
 

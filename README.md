@@ -152,3 +152,14 @@ WORK_ITEM.toml        Editable work item used by the default CLI command
 
 Planning documents are design drafts and may describe earlier names or proposed features.
 
+## Using the run service from an async application
+
+`RunService.prepare()` and `RunService.preview()` are synchronous validation and
+preview helpers. `RunService.run()` is awaitable. To obtain a run ID before the
+agent starts, call `config, paths = await service.reserve(request)`, then run
+`await service.run_reserved(config, paths)` in an application-owned task. The
+reserved manifest starts in `queued` state; execution changes it to `running`.
+Cancelling that task stops the active agent or verification subprocess and marks
+the manifest `cancelled`. The CLI uses `asyncio.run()` to keep its existing
+synchronous entry point and exit codes.
+

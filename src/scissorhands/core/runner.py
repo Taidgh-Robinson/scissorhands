@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -84,8 +86,17 @@ def _read_text(path: Path) -> str | None:
         return None
 
 
-Invoke = Callable[[list[str], str | None, Path, Path], int]
-Verify = Callable[[Sequence[str], Path], VerificationResult]
+Invoke = Callable[[list[str], str | None, Path, Path], int | Awaitable[int]]
+Verify = Callable[
+    [Sequence[str], Path], VerificationResult | Awaitable[VerificationResult]
+]
+
+
+async def _call(callback: Callable, *args):
+    if inspect.iscoroutinefunction(callback):
+        return await callback(*args)
+    result = await asyncio.to_thread(callback, *args)
+    return await result if inspect.isawaitable(result) else result
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +117,7 @@ class PreparedIteration:
     final_message: Path
 
 
-def initialize_run(config: LoopConfig) -> RunPaths:
+def initialize_run(config: LoopConfig, *, queued: bool = False) -> RunPaths:
     item_dir = (
         config.root / ".scissorhands" / validate_work_item_id(config.work_item.id)
     )
@@ -146,7 +157,7 @@ def initialize_run(config: LoopConfig) -> RunPaths:
     )
     if config.work_item_path is not None:
         shutil.copyfile(config.work_item_path, run_dir / "work-item.toml")
-    write_run_manifest(run_dir, config.work_item, [], started_at)
+    write_run_manifest(run_dir, config.work_item, [], started_at, queued=queued)
     return RunPaths(run_dir, started_at)
 
 
@@ -198,7 +209,7 @@ def prepare_iteration(
     )
 
 
-def execute_iteration(
+async def execute_iteration(
     config: LoopConfig,
     prepared: PreparedIteration,
     status: Path,
@@ -211,32 +222,45 @@ def execute_iteration(
         f"\n=== Scissorhands iteration {prepared.number}/{config.max_iterations} "
         f"({config.adapter.name}) ==="
     )
-    status_before = _modified_ns(status)
-    progress_before = _modified_ns(progress)
+    status_before, progress_before = await asyncio.to_thread(
+        lambda: (_modified_ns(status), _modified_ns(progress))
+    )
     stdin_prompt = prepared.prompt if config.adapter.uses_stdin else None
     started_at = datetime.now(UTC).isoformat()
     started = perf_counter()
-    return_code = invoke(prepared.command, stdin_prompt, prepared.log, config.root)
+    return_code = await _call(
+        invoke, prepared.command, stdin_prompt, prepared.log, config.root
+    )
     agent_elapsed_seconds = perf_counter() - started
-    status_updated = _modified_ns(status) != status_before
-    progress_updated = _modified_ns(progress) != progress_before
-    statuses = read_status(status, config.work_item.checklist())
+    status_updated, progress_updated, statuses = await asyncio.to_thread(
+        lambda: (
+            _modified_ns(status) != status_before,
+            _modified_ns(progress) != progress_before,
+            read_status(status, config.work_item.checklist()),
+        )
+    )
     claimed = False
     verification = None
     verification_elapsed_seconds = None
     if return_code == 0:
         report_status(status, statuses, updated=status_updated)
-        output = config.adapter.completion_output(
-            log=prepared.log, final_message=prepared.final_message
+        output = await asyncio.to_thread(
+            config.adapter.completion_output,
+            log=prepared.log,
+            final_message=prepared.final_message,
         )
         claimed = has_completion_marker(output, config.completion_marker)
         if config.work_item.verification:
             verification_started = perf_counter()
-            verification = verify(config.work_item.verification, config.root)
+            verification = await _call(
+                verify, config.work_item.verification, config.root
+            )
             verification_elapsed_seconds = perf_counter() - verification_started
             for index, result in enumerate(verification.results, 1):
-                (prepared.log.parent / f"verification-{index}.log").write_text(
-                    result.output, encoding="utf-8"
+                await asyncio.to_thread(
+                    (prepared.log.parent / f"verification-{index}.log").write_text,
+                    result.output,
+                    encoding="utf-8",
                 )
             report_verification(verification)
     elapsed_seconds = perf_counter() - started
@@ -247,7 +271,7 @@ def execute_iteration(
         agent_exit_code=return_code,
         statuses=statuses,
         status_updated=status_updated,
-        progress=_read_text(progress),
+        progress=await asyncio.to_thread(_read_text, progress),
         progress_updated=progress_updated,
         verification=verification,
         verification_required=bool(config.work_item.verification),
@@ -286,75 +310,119 @@ def write_final_artifacts(
         print(f"Could not write run report: {error}", file=sys.stderr)
 
 
-def run_loop(
+async def run_loop(
     config: LoopConfig,
     *,
     invoke: Invoke = run_command,
     verify: Verify = run_verification,
+    paths: RunPaths | None = None,
 ) -> LoopResult:
     """Run fresh agent sessions until completion, failure, or the configured bound."""
     if config.max_iterations < 1:
         raise ValueError("max_iterations must be at least 1")
-    paths = initialize_run(config)
+    if paths is None:
+        paths = await asyncio.to_thread(initialize_run, config)
+        reserved = False
+    else:
+        reserved = True
     feedback: str | None = None
     records: list[IterationRecord] = []
     start_tree: str | None = None
-    for number in range(1, config.max_iterations + 1):
-        loop_dir, status, progress = initialize_loop(paths, number)
-        prepared = prepare_iteration(config, loop_dir, number, feedback)
-        try:
-            before = snapshot_worktree(config.root)
-        except (OSError, subprocess.CalledProcessError) as error:
-            before = None
-            print(
-                f"Could not capture Git state before loop {number}: {getattr(error, 'stderr', error)}",
-                file=sys.stderr,
+    try:
+        if reserved:
+            await asyncio.to_thread(
+                write_run_manifest,
+                paths.run_dir,
+                config.work_item,
+                [],
+                paths.started_at,
             )
-        if number == 1:
-            start_tree = before
-        record = execute_iteration(
-            config, prepared, status, progress, invoke=invoke, verify=verify
-        )
-        after = None
-        if before is not None:
+        for number in range(1, config.max_iterations + 1):
+            loop_dir, status, progress = await asyncio.to_thread(
+                initialize_loop, paths, number
+            )
+            prepared = await asyncio.to_thread(
+                prepare_iteration, config, loop_dir, number, feedback
+            )
             try:
-                after = snapshot_worktree(config.root)
-                if after is not None:
-                    write_loop_diff(
-                        config.root, before, after, loop_dir / "changes.patch"
-                    )
+                before = await asyncio.to_thread(snapshot_worktree, config.root)
             except (OSError, subprocess.CalledProcessError) as error:
+                before = None
                 print(
-                    f"Could not save Git diff for loop {number}: {error}",
+                    f"Could not capture Git state before loop {number}: {getattr(error, 'stderr', error)}",
                     file=sys.stderr,
                 )
-        record = replace(record, git_before_tree=before, git_after_tree=after)
-        write_iteration_receipt(loop_dir / f"iteration-{number}.json", record)
-        try:
-            write_loop_report(
-                loop_dir, config.work_item, record, records[-1] if records else None
+            if number == 1:
+                start_tree = before
+            record = await execute_iteration(
+                config, prepared, status, progress, invoke=invoke, verify=verify
             )
-        except OSError as error:
-            print(f"Could not write loop report: {error}", file=sys.stderr)
-        records.append(record)
-        try:
-            write_run_manifest(
-                paths.run_dir, config.work_item, records, paths.started_at
+            after = None
+            if before is not None:
+                try:
+                    after = await asyncio.to_thread(snapshot_worktree, config.root)
+                    if after is not None:
+                        await asyncio.to_thread(
+                            write_loop_diff,
+                            config.root,
+                            before,
+                            after,
+                            loop_dir / "changes.patch",
+                        )
+                except (OSError, subprocess.CalledProcessError) as error:
+                    print(
+                        f"Could not save Git diff for loop {number}: {error}",
+                        file=sys.stderr,
+                    )
+            record = replace(record, git_before_tree=before, git_after_tree=after)
+            await asyncio.to_thread(
+                write_iteration_receipt, loop_dir / f"iteration-{number}.json", record
             )
-        except OSError as error:
-            print(f"Could not update run manifest: {error}", file=sys.stderr)
-        report_iteration(record, prepared.log)
-        decision = record.decision
-        if decision.accepted or decision.outcome == "agent_failed":
-            write_final_artifacts(config, paths, records, start_tree)
-            return LoopResult(
-                completed=decision.accepted,
-                iterations=number,
-                run_dir=paths.run_dir,
-                failed=decision.outcome == "agent_failed",
-            )
-        feedback = record.verification_feedback
-    write_final_artifacts(config, paths, records, start_tree)
+            try:
+                await asyncio.to_thread(
+                    write_loop_report,
+                    loop_dir,
+                    config.work_item,
+                    record,
+                    records[-1] if records else None,
+                )
+            except OSError as error:
+                print(f"Could not write loop report: {error}", file=sys.stderr)
+            records.append(record)
+            try:
+                await asyncio.to_thread(
+                    write_run_manifest,
+                    paths.run_dir,
+                    config.work_item,
+                    records,
+                    paths.started_at,
+                )
+            except OSError as error:
+                print(f"Could not update run manifest: {error}", file=sys.stderr)
+            report_iteration(record, prepared.log)
+            decision = record.decision
+            if decision.accepted or decision.outcome == "agent_failed":
+                await asyncio.to_thread(
+                    write_final_artifacts, config, paths, records, start_tree
+                )
+                return LoopResult(
+                    completed=decision.accepted,
+                    iterations=number,
+                    run_dir=paths.run_dir,
+                    failed=decision.outcome == "agent_failed",
+                )
+            feedback = record.verification_feedback
+    except asyncio.CancelledError:
+        await asyncio.to_thread(
+            write_run_manifest,
+            paths.run_dir,
+            config.work_item,
+            records,
+            paths.started_at,
+            cancelled=True,
+        )
+        raise
+    await asyncio.to_thread(write_final_artifacts, config, paths, records, start_tree)
     return LoopResult(
         completed=False,
         iterations=config.max_iterations,

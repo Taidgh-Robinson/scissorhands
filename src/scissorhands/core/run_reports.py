@@ -132,6 +132,8 @@ def write_run_manifest(
     started_at: str,
     *,
     finished: bool = False,
+    cancelled: bool = False,
+    queued: bool = False,
 ) -> None:
     """Atomically save the latest known run state, including interrupted runs."""
     now = datetime.now(UTC).isoformat()
@@ -156,11 +158,23 @@ def write_run_manifest(
         "schema_version": 2,
         "run_id": run_dir.name,
         "work_item_id": work_item.id,
-        "state": "finished" if finished else "running",
-        "outcome": _run_outcome(records) if finished else None,
+        "state": (
+            "cancelled"
+            if cancelled
+            else "finished"
+            if finished
+            else "queued"
+            if queued
+            else "running"
+        ),
+        "outcome": "cancelled"
+        if cancelled
+        else _run_outcome(records)
+        if finished
+        else None,
         "started_at": started_at,
         "updated_at": now,
-        "finished_at": now if finished else None,
+        "finished_at": now if finished or cancelled else None,
         "loops": timeline,
     }
     temporary = run_dir / "report.json.tmp"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -14,7 +15,9 @@ from scissorhands.core.runner import (
     Invoke,
     LoopConfig,
     LoopResult,
+    RunPaths,
     Verify,
+    initialize_run,
     run_loop,
 )
 from scissorhands.core.verification import run_verification
@@ -129,8 +132,19 @@ class RunService:
         )
         return RunPreview(tuple(command), prompt, config.adapter.uses_stdin)
 
-    def run(self, request: RunRequest) -> LoopResult:
-        """Execute a validated request synchronously and return its artifacts."""
-        return run_loop(
+    async def run(self, request: RunRequest) -> LoopResult:
+        """Execute a validated request without blocking the caller's event loop."""
+        return await run_loop(
             self.prepare(request), invoke=self._invoke, verify=self._verify
+        )
+
+    async def reserve(self, request: RunRequest) -> tuple[LoopConfig, RunPaths]:
+        """Validate and allocate durable run artifacts before execution starts."""
+        config = self.prepare(request)
+        return config, await asyncio.to_thread(initialize_run, config, queued=True)
+
+    async def run_reserved(self, config: LoopConfig, paths: RunPaths) -> LoopResult:
+        """Execute a run whose directory and initial manifest already exist."""
+        return await run_loop(
+            config, invoke=self._invoke, verify=self._verify, paths=paths
         )

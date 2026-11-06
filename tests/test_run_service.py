@@ -1,21 +1,22 @@
+import asyncio
 import json
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from scissorhands.cli import main
 from scissorhands.core.run_service import RunPreview, RunRequest, RunService
 from scissorhands.core.runner import LoopResult
 
-WORK_ITEM = '''id = "SERVICE-1"
+WORK_ITEM = """id = "SERVICE-1"
 title = "Test the service"
 description = "Run one loop."
 definition_of_done = ["Tests pass."]
 acceptance_criteria = ["The task is done."]
-'''
+"""
 
 
 class RunServiceTests(TestCase):
@@ -36,7 +37,9 @@ class RunServiceTests(TestCase):
                 )
             )
 
-            self.assertEqual(preview.command[:4], ("/bin/opencode", "run", "--model", "test-model"))
+            self.assertEqual(
+                preview.command[:4], ("/bin/opencode", "run", "--model", "test-model")
+            )
             self.assertFalse(preview.uses_stdin)
             self.assertIn("Round 1: say <promise>COMPLETE</promise>.", preview.prompt)
             self.assertIn("run-DRY-RUN", preview.prompt)
@@ -49,7 +52,9 @@ class RunServiceTests(TestCase):
             (root / "WORK_ITEM.toml").write_text(WORK_ITEM, encoding="utf-8")
             calls = []
 
-            def invoke(command: list[str], prompt: str | None, log: Path, cwd: Path) -> int:
+            def invoke(
+                command: list[str], prompt: str | None, log: Path, cwd: Path
+            ) -> int:
                 calls.append((command, prompt, cwd))
                 (log.parent / "status.json").write_text(
                     json.dumps(
@@ -68,7 +73,9 @@ class RunServiceTests(TestCase):
                 invoke=invoke,
                 find_executable=lambda _: "/bin/opencode",
             )
-            result = service.run(RunRequest(agent="opencode", max_iterations=2))
+            result = asyncio.run(
+                service.run(RunRequest(agent="opencode", max_iterations=2))
+            )
 
             self.assertTrue(result.completed)
             self.assertEqual(result.iterations, 1)
@@ -84,11 +91,17 @@ class RunServiceTests(TestCase):
             service = RunService(root, find_executable=lambda _: None)
             for request, message in (
                 (RunRequest(max_iterations=0), "--max-iterations must be at least 1"),
-                (RunRequest(work_item_path=Path("missing.toml")), "Work item does not exist"),
+                (
+                    RunRequest(work_item_path=Path("missing.toml")),
+                    "Work item does not exist",
+                ),
                 (RunRequest(agent="unknown"), "Unknown agent"),
                 (RunRequest(agent="opencode"), "Agent executable not found"),
             ):
-                with self.subTest(request=request), self.assertRaisesRegex(ValueError, message):
+                with (
+                    self.subTest(request=request),
+                    self.assertRaisesRegex(ValueError, message),
+                ):
                     service.prepare(request)
             self.assertFalse((root / ".scissorhands").exists())
 
@@ -97,7 +110,10 @@ class CliServiceTests(TestCase):
     def test_dry_run_calls_service_preview(self) -> None:
         preview = RunPreview(("opencode", "run", "full prompt"), "full prompt", False)
         output = StringIO()
-        with patch("scissorhands.cli.RunService") as service_type, redirect_stdout(output):
+        with (
+            patch("scissorhands.cli.RunService") as service_type,
+            redirect_stdout(output),
+        ):
             service_type.return_value.preview.return_value = preview
             exit_code = main(["--agent", "opencode", "--dry-run"])
 
@@ -116,8 +132,11 @@ class CliServiceTests(TestCase):
             (LoopResult(False, 1, Path("/tmp/run"), failed=True), 1),
             (LoopResult(False, 2, Path("/tmp/run")), 2),
         ):
-            with self.subTest(result=result), patch("scissorhands.cli.RunService") as service_type:
-                service_type.return_value.run.return_value = result
+            with (
+                self.subTest(result=result),
+                patch("scissorhands.cli.RunService") as service_type,
+            ):
+                service_type.return_value.run = AsyncMock(return_value=result)
                 with redirect_stdout(StringIO()):
                     exit_code = main(["--max-iterations", "2"])
                 self.assertEqual(exit_code, expected)

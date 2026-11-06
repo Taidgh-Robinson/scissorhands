@@ -1,3 +1,4 @@
+import asyncio
 import json
 import subprocess
 from collections.abc import Sequence
@@ -15,7 +16,9 @@ from scissorhands.core.runner import (
     LoopConfig,
     has_completion_marker,
     initialize_run,
-    run_loop,
+)
+from scissorhands.core.runner import (
+    run_loop as async_run_loop,
 )
 from scissorhands.core.verification import CommandResult, VerificationResult
 from scissorhands.core.work_items import WorkItem
@@ -30,6 +33,10 @@ WORK_ITEM = WorkItem(
 )
 VERIFIED_WORK_ITEM = replace(WORK_ITEM, verification=("make test",))
 MARKER = "<promise>COMPLETE</promise>"
+
+
+def run_loop(*args, **kwargs):
+    return asyncio.run(async_run_loop(*args, **kwargs))
 
 
 def active_status(root: Path) -> Path:

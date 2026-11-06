@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-import subprocess
+import asyncio
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+from scissorhands.core.execution import stop_process
 
 FEEDBACK_TAIL_LINES = 60
 
@@ -52,18 +55,25 @@ class VerificationResult:
         return "\n\n".join(sections)
 
 
-def run_verification(commands: Sequence[str], cwd: Path) -> VerificationResult:
-    """Run each command through the shell and capture its combined output."""
+async def run_verification(commands: Sequence[str], cwd: Path) -> VerificationResult:
+    """Run each command through the shell without blocking the event loop."""
     results = []
     for command in commands:
-        completed = subprocess.run(
+        process = await asyncio.create_subprocess_shell(
             command,
-            shell=True,
             cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            check=False,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            start_new_session=os.name == "posix",
         )
-        results.append(CommandResult(command, completed.returncode, completed.stdout))
+        try:
+            output, _ = await process.communicate()
+        except asyncio.CancelledError:
+            await stop_process(process)
+            raise
+        results.append(
+            CommandResult(
+                command, process.returncode, output.decode("utf-8", errors="replace")
+            )
+        )
     return VerificationResult(tuple(results))
