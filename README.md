@@ -18,7 +18,13 @@ uv run python -m unittest discover -s tests -v
 uv run scissorhands --agent claude --work-item WORK_ITEM.toml --max-iterations 5
 uv run scissorhands --agent codex --work-item WORK_ITEM.toml --max-iterations 5
 uv run scissorhands --agent opencode --work-item WORK_ITEM.toml --max-iterations 5
+
+# Target a different project without changing your working directory:
+uv run scissorhands --root /path/to/project --agent codex --work-item WORK_ITEM.toml
 ```
+
+`--root` defaults to the current directory. Relative work-item and contract paths resolve
+against that project, and execution and run artifacts use the same root.
 
 Each iteration starts a new agent session. Each invocation gets the next numbered run under
 `.scissorhands/<work-item-id>/run-0001/`, with one `loop-0001/` folder per iteration:
@@ -141,14 +147,124 @@ Small limits make it much easier to learn how prompt wording affects convergence
 
 ```text
 src/scissorhands/
-  cli.py              Command-line entry point
-  agents.py           Agent-specific commands and output handling
-  core/               Loop orchestration, execution, decisions, receipts, and reporting
-  prompting/          Prompt composition, contract rendering, and default template
-tests/                Unit tests
+  application/        Shared entry points for CLI and future API callers
+    models.py         Run requests and previews
+    runs.py           Validation, preview, reservation, and async execution
+  cli/                Argument parsing, command entry point, terminal output
+  core/               Work-item, criterion, iteration, and verification models
+    loop/             Orchestration, iteration execution, subprocesses, observers
+  storage/            Project layout and filesystem operations
+    repository.py     Read-only run and artifact queries
+    paths.py          Directory discovery, IDs, and path validation
+    artifacts.py      Known artifact names and bounded file decoding
+    runs.py           Run allocation, snapshots, and artifact persistence
+    reports/          Manifest JSON, loop reports, and run reports
+  prompting/          Work-item rendering, prompt composition, contract templates
+  agents.py           Agent-specific commands and completion-output handling
+tests/                Tests grouped by application, CLI, core, storage, and prompting
 docs/planning/        Roadmaps and design drafts
 WORK_ITEM.toml        Editable work item used by the default CLI command
 ```
 
 Planning documents are design drafts and may describe earlier names or proposed features.
+
+The interface boundary is `scissorhands.application`:
+
+```python
+from scissorhands.application import RunObserver, RunRepository, RunRequest, RunService
+```
+
+A future `src/scissorhands/api/` package should contain HTTP application setup, routes,
+request/response schemas, dependency wiring, and HTTP error translation. Its handlers
+call these shared operations with the selected project root. Run management policy
+belongs in `application/`, loop decisions in `core/`, and file access in `storage/`.
+This keeps the API from duplicating validation, parsing artifacts, constructing agent
+commands, or implementing completion rules. Neither the backend nor its models import
+the CLI or an HTTP framework; architecture tests guard this boundary.
+
+The CLI command and on-disk artifact formats are unchanged. Python imports from the old
+`core.run_service`, `core.run_repository`, and `core.runner` modules should migrate to
+`scissorhands.application` or the specific owner modules shown above. Work-item prompt
+rendering is now `prompting.work_items.render_work_item()`, and TOML loading is
+`storage.work_items.load_work_item()`.
+
+## Using the run service from an async application
+
+`RunService.prepare()` and `RunService.preview()` are synchronous validation and
+preview helpers. `RunService.run()` is awaitable. To obtain a run ID before the
+agent starts, call `config, paths = await service.reserve(request)`, then run
+`await service.run_reserved(config, paths)` in an application-owned task. The
+reserved manifest starts in `queued` state; execution changes it to `running`.
+Cancelling that task stops the active agent or verification subprocess and marks
+the manifest `cancelled`. The CLI uses `asyncio.run()` to keep its existing
+synchronous entry point and exit codes.
+
+Backend execution is silent by default. Pass `observer=...` to `RunService` to receive
+iteration, agent-output, status, verification, and warning notifications. The CLI supplies
+`cli.reporting.TerminalReporter` to preserve its terminal output. Other interfaces can
+subclass `RunObserver` and override the hooks they need. Hooks are synchronous and must
+return promptly; storage warnings can arrive from worker threads. An async observer
+integration should enqueue events using its event loop's thread-safe facilities.
+Custom invokers own their output forwarding; the default subprocess invoker forwards
+output to the supplied observer automatically. Persisted artifacts remain the source
+of truth for history and polling.
+
+## Reading run data from another application
+
+`RunRepository(root)` reads the `.scissorhands/` tree in any explicitly selected project
+folder. It does not require a Git repository, work-item TOML, installed agent, or web
+framework, and it never creates directories or rewrites artifacts. Keep execution in
+`RunService` and use the repository for queries from a future `api/` package:
+
+```python
+from dataclasses import asdict
+from pathlib import Path
+
+from scissorhands.application import RunRepository
+
+repository = RunRepository(Path("/path/to/project"))
+work_items = repository.list_work_items()
+runs = repository.list_runs()  # optionally filter with work_item_id="TASK-1"
+if runs:
+    run = runs[0]
+    detail = repository.read_run(run.work_item_id, run.run_id)
+    payload = asdict(detail)  # plain JSON-serializable values
+    if detail.loops:
+        loop = repository.read_loop(run.work_item_id, run.run_id, detail.loops[-1])
+        output = repository.read_artifact(
+            run.work_item_id, run.run_id, "agent_output",
+            loop=loop.number, tail=True, limit=16_384,
+        )
+```
+
+Both work-item and run IDs identify a run; numbering repeats across work items and
+projects. Lists are ordered by work-item ID and ascending run number. A project with
+no `.scissorhands/` folder returns empty lists. Missing project, requested work-item,
+run, or loop directories raise `FileNotFoundError`; invalid IDs or options raise
+`ValueError`. Directory symlinks are excluded from discovery and rejected on direct
+access with `UnsafeArtifactPath` (a `ValueError`).
+
+Each artifact has a `state`: `available`, `missing`, `invalid`, `unavailable`, `unsafe`,
+or `too_large`. Missing or damaged manifests leave the run visible with an `unknown`
+state. Run details also discover loop directories that do not yet have a receipt.
+Manifest lifecycle values are persisted observations; `running` alone does not prove
+that a process is still alive. Receipts and manifests retain their original fields,
+including the distinction between agent claims and harness verification decisions.
+
+Run artifact kinds are `manifest`, `settings`, `work_item`, `work_item_toml`, `report`,
+and `patch`. Supplying `loop=N` selects loop kinds: `receipt`, `report`, `agent_output`,
+`final_message`, `status`, `progress`, `prompt`, `patch`, and `verification_output`.
+The latter also requires `verification=N`. Callers cannot supply arbitrary filenames;
+file symlinks must resolve inside the selected run.
+
+JSON reads require an object and are capped at 4 MiB. Text reads default to 64 KiB,
+with a maximum of 1 MiB per call. Use `offset` and `limit` for byte windows, or
+`tail=True` and `limit` for recent output. Results include the byte offset, bytes read,
+observed total size, and truncation flag. Invalid or split UTF-8 characters are replaced.
+Files are read independently, so active-run responses are not an atomic snapshot.
+
+Repository methods perform synchronous filesystem I/O. An async API should call them
+through a worker thread (for example, `await asyncio.to_thread(repository.list_runs)`)
+and map their results and errors to HTTP responses. Project registration, HTTP routes,
+and background task ownership remain responsibilities of that future application layer.
 

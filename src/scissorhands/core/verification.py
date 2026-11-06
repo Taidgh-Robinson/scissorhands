@@ -1,11 +1,6 @@
-"""Harness-run verification commands."""
+"""Verification results and feedback for completion decisions."""
 
-from __future__ import annotations
-
-import subprocess
-from collections.abc import Sequence
 from dataclasses import dataclass
-from pathlib import Path
 
 FEEDBACK_TAIL_LINES = 60
 
@@ -50,20 +45,3 @@ class VerificationResult:
                 f"```text\n{output}\n```"
             )
         return "\n\n".join(sections)
-
-
-def run_verification(commands: Sequence[str], cwd: Path) -> VerificationResult:
-    """Run each command through the shell and capture its combined output."""
-    results = []
-    for command in commands:
-        completed = subprocess.run(
-            command,
-            shell=True,
-            cwd=cwd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            check=False,
-        )
-        results.append(CommandResult(command, completed.returncode, completed.stdout))
-    return VerificationResult(tuple(results))

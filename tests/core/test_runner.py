@@ -1,3 +1,4 @@
+import asyncio
 import json
 import subprocess
 from collections.abc import Sequence
@@ -11,15 +12,16 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 from scissorhands.agents import OpenCodeAdapter
-from scissorhands.core.runner import (
-    LoopConfig,
-    has_completion_marker,
-    initialize_run,
-    run_loop,
+from scissorhands.cli.reporting import TerminalReporter
+from scissorhands.core.loop.iteration import has_completion_marker
+from scissorhands.core.loop.models import LoopConfig
+from scissorhands.core.loop.runner import (
+    run_loop as async_run_loop,
 )
 from scissorhands.core.verification import CommandResult, VerificationResult
 from scissorhands.core.work_items import WorkItem
 from scissorhands.prompting.compose import compose_prompt
+from scissorhands.storage.runs import initialize_run
 
 WORK_ITEM = WorkItem(
     id="WORK-ITEM",
@@ -30,6 +32,11 @@ WORK_ITEM = WorkItem(
 )
 VERIFIED_WORK_ITEM = replace(WORK_ITEM, verification=("make test",))
 MARKER = "<promise>COMPLETE</promise>"
+
+
+def run_loop(*args, **kwargs):
+    kwargs.setdefault("observer", TerminalReporter())
+    return asyncio.run(async_run_loop(*args, **kwargs))
 
 
 def active_status(root: Path) -> Path:
