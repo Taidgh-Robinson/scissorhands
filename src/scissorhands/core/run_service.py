@@ -59,13 +59,17 @@ class RunService:
         verify: Verify = run_verification,
         find_executable: Callable[[str], str | None] = shutil.which,
     ) -> None:
-        self.root = root.resolve()
+        self.root = root.expanduser().resolve()
         self._invoke = invoke
         self._verify = verify
         self._find_executable = find_executable
 
     def prepare(self, request: RunRequest) -> LoopConfig:
         """Resolve a request to validated, backend-neutral loop configuration."""
+        if not self.root.is_dir():
+            raise ValueError(
+                f"Project root does not exist or is not a directory: {self.root}"
+            )
         if request.max_iterations < 1:
             raise ValueError("--max-iterations must be at least 1")
         work_item_path = (

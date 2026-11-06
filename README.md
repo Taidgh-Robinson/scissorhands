@@ -18,7 +18,13 @@ uv run python -m unittest discover -s tests -v
 uv run scissorhands --agent claude --work-item WORK_ITEM.toml --max-iterations 5
 uv run scissorhands --agent codex --work-item WORK_ITEM.toml --max-iterations 5
 uv run scissorhands --agent opencode --work-item WORK_ITEM.toml --max-iterations 5
+
+# Target a different project without changing your working directory:
+uv run scissorhands --root /path/to/project --agent codex --work-item WORK_ITEM.toml
 ```
+
+`--root` defaults to the current directory. Relative work-item and contract paths resolve
+against that project, and execution and run artifacts use the same root.
 
 Each iteration starts a new agent session. Each invocation gets the next numbered run under
 `.scissorhands/<work-item-id>/run-0001/`, with one `loop-0001/` folder per iteration:
@@ -144,6 +150,8 @@ src/scissorhands/
   cli.py              Command-line entry point
   agents.py           Agent-specific commands and output handling
   core/               Loop orchestration, execution, decisions, receipts, and reporting
+    run_service.py    Request validation, preview, reservation, and async execution
+    run_repository.py Read-only run history and bounded artifact access for a project
   prompting/          Prompt composition, contract rendering, and default template
 tests/                Unit tests
 docs/planning/        Roadmaps and design drafts
@@ -162,4 +170,63 @@ reserved manifest starts in `queued` state; execution changes it to `running`.
 Cancelling that task stops the active agent or verification subprocess and marks
 the manifest `cancelled`. The CLI uses `asyncio.run()` to keep its existing
 synchronous entry point and exit codes.
+
+## Reading run data from another application
+
+`RunRepository(root)` reads the `.scissorhands/` tree in any explicitly selected project
+folder. It does not require a Git repository, work-item TOML, installed agent, or web
+framework, and it never creates directories or rewrites artifacts. Keep execution in
+`RunService` and use the repository for queries from a future `api/` package:
+
+```python
+from dataclasses import asdict
+from pathlib import Path
+
+from scissorhands.core.run_repository import RunRepository
+
+repository = RunRepository(Path("/path/to/project"))
+work_items = repository.list_work_items()
+runs = repository.list_runs()  # optionally filter with work_item_id="TASK-1"
+if runs:
+    run = runs[0]
+    detail = repository.read_run(run.work_item_id, run.run_id)
+    payload = asdict(detail)  # plain JSON-serializable values
+    if detail.loops:
+        loop = repository.read_loop(run.work_item_id, run.run_id, detail.loops[-1])
+        output = repository.read_artifact(
+            run.work_item_id, run.run_id, "agent_output",
+            loop=loop.number, tail=True, limit=16_384,
+        )
+```
+
+Both work-item and run IDs identify a run; numbering repeats across work items and
+projects. Lists are ordered by work-item ID and ascending run number. A project with
+no `.scissorhands/` folder returns empty lists. Missing project, requested work-item,
+run, or loop directories raise `FileNotFoundError`; invalid IDs or options raise
+`ValueError`. Directory symlinks are excluded from discovery and rejected on direct
+access with `UnsafeArtifactPath` (a `ValueError`).
+
+Each artifact has a `state`: `available`, `missing`, `invalid`, `unavailable`, `unsafe`,
+or `too_large`. Missing or damaged manifests leave the run visible with an `unknown`
+state. Run details also discover loop directories that do not yet have a receipt.
+Manifest lifecycle values are persisted observations; `running` alone does not prove
+that a process is still alive. Receipts and manifests retain their original fields,
+including the distinction between agent claims and harness verification decisions.
+
+Run artifact kinds are `manifest`, `settings`, `work_item`, `work_item_toml`, `report`,
+and `patch`. Supplying `loop=N` selects loop kinds: `receipt`, `report`, `agent_output`,
+`final_message`, `status`, `progress`, `prompt`, `patch`, and `verification_output`.
+The latter also requires `verification=N`. Callers cannot supply arbitrary filenames;
+file symlinks must resolve inside the selected run.
+
+JSON reads require an object and are capped at 4 MiB. Text reads default to 64 KiB,
+with a maximum of 1 MiB per call. Use `offset` and `limit` for byte windows, or
+`tail=True` and `limit` for recent output. Results include the byte offset, bytes read,
+observed total size, and truncation flag. Invalid or split UTF-8 characters are replaced.
+Files are read independently, so active-run responses are not an atomic snapshot.
+
+Repository methods perform synchronous filesystem I/O. An async API should call them
+through a worker thread (for example, `await asyncio.to_thread(repository.list_runs)`)
+and map their results and errors to HTTP responses. Project registration, HTTP routes,
+and background task ownership remain responsibilities of that future application layer.
 

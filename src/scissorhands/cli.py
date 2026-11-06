@@ -16,6 +16,12 @@ def build_parser() -> argparse.ArgumentParser:
         prog="scissorhands",
         description="Run a bounded, fresh-session agent loop with Claude Code, Codex, or OpenCode.",
     )
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=Path.cwd(),
+        help="Project folder for execution and relative paths (default: current directory)",
+    )
     parser.add_argument("--agent", choices=sorted(ADAPTERS), default="codex")
     parser.add_argument(
         "--work-item",
@@ -44,7 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    service = RunService(Path.cwd())
+    service = RunService(args.root)
     request = RunRequest(
         work_item_path=args.work_item,
         agent=args.agent,

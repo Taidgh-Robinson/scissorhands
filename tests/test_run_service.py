@@ -20,6 +20,18 @@ acceptance_criteria = ["The task is done."]
 
 
 class RunServiceTests(TestCase):
+    def test_missing_or_file_root_is_rejected_before_preparing(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            file = root / "file"
+            file.write_text("not a directory")
+            for invalid_root in (root / "missing", file):
+                with (
+                    self.subTest(root=invalid_root),
+                    self.assertRaisesRegex(ValueError, "Project root"),
+                ):
+                    RunService(invalid_root).prepare(RunRequest())
+
     def test_preview_uses_root_and_does_not_create_run_artifacts(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -107,6 +119,19 @@ class RunServiceTests(TestCase):
 
 
 class CliServiceTests(TestCase):
+    def test_root_is_passed_to_service_without_changing_working_directory(self) -> None:
+        original = Path.cwd()
+        with (
+            patch("scissorhands.cli.RunService") as service_type,
+            redirect_stdout(StringIO()),
+        ):
+            service_type.return_value.preview.return_value = RunPreview(
+                ("agent",), "prompt", True
+            )
+            self.assertEqual(main(["--root", "/tmp/other-project", "--dry-run"]), 0)
+        service_type.assert_called_once_with(Path("/tmp/other-project"))
+        self.assertEqual(Path.cwd(), original)
+
     def test_dry_run_calls_service_preview(self) -> None:
         preview = RunPreview(("opencode", "run", "full prompt"), "full prompt", False)
         output = StringIO()
@@ -118,6 +143,7 @@ class CliServiceTests(TestCase):
             exit_code = main(["--agent", "opencode", "--dry-run"])
 
         self.assertEqual(exit_code, 0)
+        service_type.assert_called_once_with(Path.cwd())
         service_type.return_value.preview.assert_called_once()
         service_type.return_value.run.assert_not_called()
         self.assertEqual(
