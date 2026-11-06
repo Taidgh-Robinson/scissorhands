@@ -5,10 +5,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
+from scissorhands.core.loop.verification import run_verification
 from scissorhands.core.verification import (
     CommandResult,
     VerificationResult,
-    run_verification,
 )
 
 PYTHON = shlex.quote(sys.executable)

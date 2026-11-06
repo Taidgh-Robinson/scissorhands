@@ -1,15 +1,13 @@
 import asyncio
 import json
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-from scissorhands.cli import main
-from scissorhands.core.run_service import RunPreview, RunRequest, RunService
-from scissorhands.core.runner import LoopResult
+from scissorhands.application import RunObserver, RunRequest, RunService
 
 WORK_ITEM = """id = "SERVICE-1"
 title = "Test the service"
@@ -85,10 +83,13 @@ class RunServiceTests(TestCase):
                 invoke=invoke,
                 find_executable=lambda _: "/bin/opencode",
             )
-            result = asyncio.run(
-                service.run(RunRequest(agent="opencode", max_iterations=2))
-            )
+            output = StringIO()
+            with redirect_stdout(output), redirect_stderr(output):
+                result = asyncio.run(
+                    service.run(RunRequest(agent="opencode", max_iterations=2))
+                )
 
+            self.assertEqual(output.getvalue(), "")
             self.assertTrue(result.completed)
             self.assertEqual(result.iterations, 1)
             self.assertEqual(len(calls), 1)
@@ -102,7 +103,7 @@ class RunServiceTests(TestCase):
             (root / "WORK_ITEM.toml").write_text(WORK_ITEM, encoding="utf-8")
             service = RunService(root, find_executable=lambda _: None)
             for request, message in (
-                (RunRequest(max_iterations=0), "--max-iterations must be at least 1"),
+                (RunRequest(max_iterations=0), "max_iterations must be at least 1"),
                 (
                     RunRequest(work_item_path=Path("missing.toml")),
                     "Work item does not exist",
@@ -117,53 +118,48 @@ class RunServiceTests(TestCase):
                     service.prepare(request)
             self.assertFalse((root / ".scissorhands").exists())
 
+    def test_observer_receives_run_activity_and_storage_warnings(self) -> None:
+        events = []
 
-class CliServiceTests(TestCase):
-    def test_root_is_passed_to_service_without_changing_working_directory(self) -> None:
-        original = Path.cwd()
-        with (
-            patch("scissorhands.cli.RunService") as service_type,
-            redirect_stdout(StringIO()),
-        ):
-            service_type.return_value.preview.return_value = RunPreview(
-                ("agent",), "prompt", True
+        class RecordingObserver(RunObserver):
+            def on_iteration_started(self, number, maximum, agent):
+                events.append(("started", number))
+
+            def on_status(self, path, statuses, *, updated):
+                events.append(("status", updated))
+
+            def on_iteration_finished(self, record, log):
+                events.append(("finished", record.decision.outcome))
+
+            def on_warning(self, message):
+                events.append(("warning", message))
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "WORK_ITEM.toml").write_text(WORK_ITEM)
+
+            def invoke(command, prompt, log, cwd):
+                log.write_text("still working")
+                return 0
+
+            service = RunService(
+                root,
+                invoke=invoke,
+                find_executable=lambda _: "agent",
+                observer=RecordingObserver(),
             )
-            self.assertEqual(main(["--root", "/tmp/other-project", "--dry-run"]), 0)
-        service_type.assert_called_once_with(Path("/tmp/other-project"))
-        self.assertEqual(Path.cwd(), original)
-
-    def test_dry_run_calls_service_preview(self) -> None:
-        preview = RunPreview(("opencode", "run", "full prompt"), "full prompt", False)
-        output = StringIO()
-        with (
-            patch("scissorhands.cli.RunService") as service_type,
-            redirect_stdout(output),
-        ):
-            service_type.return_value.preview.return_value = preview
-            exit_code = main(["--agent", "opencode", "--dry-run"])
-
-        self.assertEqual(exit_code, 0)
-        service_type.assert_called_once_with(Path.cwd())
-        service_type.return_value.preview.assert_called_once()
-        service_type.return_value.run.assert_not_called()
-        self.assertEqual(
-            service_type.return_value.preview.call_args.args[0].agent, "opencode"
-        )
-        self.assertIn("opencode run '<PROMPT>'", output.getvalue())
-        self.assertIn("full prompt", output.getvalue())
-
-    def test_run_calls_service_and_preserves_exit_codes(self) -> None:
-        for result, expected in (
-            (LoopResult(True, 1, Path("/tmp/run")), 0),
-            (LoopResult(False, 1, Path("/tmp/run"), failed=True), 1),
-            (LoopResult(False, 2, Path("/tmp/run")), 2),
-        ):
-            with (
-                self.subTest(result=result),
-                patch("scissorhands.cli.RunService") as service_type,
+            with patch(
+                "scissorhands.storage.runs.snapshot_worktree",
+                side_effect=OSError("Git unavailable"),
             ):
-                service_type.return_value.run = AsyncMock(return_value=result)
-                with redirect_stdout(StringIO()):
-                    exit_code = main(["--max-iterations", "2"])
-                self.assertEqual(exit_code, expected)
-                service_type.return_value.run.assert_called_once()
+                result = asyncio.run(
+                    service.run(RunRequest(agent="opencode", max_iterations=1))
+                )
+            self.assertFalse(result.completed)
+            self.assertEqual(
+                [event[0] for event in events],
+                ["warning", "started", "status", "finished"],
+            )
+            self.assertIn("Git unavailable", events[0][1])
+            self.assertEqual(events[-1], ("finished", "iteration_limit"))
+            self.assertTrue((result.run_dir / "report.json").is_file())

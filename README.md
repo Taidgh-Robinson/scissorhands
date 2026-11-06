@@ -147,18 +147,46 @@ Small limits make it much easier to learn how prompt wording affects convergence
 
 ```text
 src/scissorhands/
-  cli.py              Command-line entry point
-  agents.py           Agent-specific commands and output handling
-  core/               Loop orchestration, execution, decisions, receipts, and reporting
-    run_service.py    Request validation, preview, reservation, and async execution
-    run_repository.py Read-only run history and bounded artifact access for a project
-  prompting/          Prompt composition, contract rendering, and default template
-tests/                Unit tests
+  application/        Shared entry points for CLI and future API callers
+    models.py         Run requests and previews
+    runs.py           Validation, preview, reservation, and async execution
+  cli/                Argument parsing, command entry point, terminal output
+  core/               Work-item, criterion, iteration, and verification models
+    loop/             Orchestration, iteration execution, subprocesses, observers
+  storage/            Project layout and filesystem operations
+    repository.py     Read-only run and artifact queries
+    paths.py          Directory discovery, IDs, and path validation
+    artifacts.py      Known artifact names and bounded file decoding
+    runs.py           Run allocation, snapshots, and artifact persistence
+    reports/          Manifest JSON, loop reports, and run reports
+  prompting/          Work-item rendering, prompt composition, contract templates
+  agents.py           Agent-specific commands and completion-output handling
+tests/                Tests grouped by application, CLI, core, storage, and prompting
 docs/planning/        Roadmaps and design drafts
 WORK_ITEM.toml        Editable work item used by the default CLI command
 ```
 
 Planning documents are design drafts and may describe earlier names or proposed features.
+
+The interface boundary is `scissorhands.application`:
+
+```python
+from scissorhands.application import RunObserver, RunRepository, RunRequest, RunService
+```
+
+A future `src/scissorhands/api/` package should contain HTTP application setup, routes,
+request/response schemas, dependency wiring, and HTTP error translation. Its handlers
+call these shared operations with the selected project root. Run management policy
+belongs in `application/`, loop decisions in `core/`, and file access in `storage/`.
+This keeps the API from duplicating validation, parsing artifacts, constructing agent
+commands, or implementing completion rules. Neither the backend nor its models import
+the CLI or an HTTP framework; architecture tests guard this boundary.
+
+The CLI command and on-disk artifact formats are unchanged. Python imports from the old
+`core.run_service`, `core.run_repository`, and `core.runner` modules should migrate to
+`scissorhands.application` or the specific owner modules shown above. Work-item prompt
+rendering is now `prompting.work_items.render_work_item()`, and TOML loading is
+`storage.work_items.load_work_item()`.
 
 ## Using the run service from an async application
 
@@ -171,6 +199,16 @@ Cancelling that task stops the active agent or verification subprocess and marks
 the manifest `cancelled`. The CLI uses `asyncio.run()` to keep its existing
 synchronous entry point and exit codes.
 
+Backend execution is silent by default. Pass `observer=...` to `RunService` to receive
+iteration, agent-output, status, verification, and warning notifications. The CLI supplies
+`cli.reporting.TerminalReporter` to preserve its terminal output. Other interfaces can
+subclass `RunObserver` and override the hooks they need. Hooks are synchronous and must
+return promptly; storage warnings can arrive from worker threads. An async observer
+integration should enqueue events using its event loop's thread-safe facilities.
+Custom invokers own their output forwarding; the default subprocess invoker forwards
+output to the supplied observer automatically. Persisted artifacts remain the source
+of truth for history and polling.
+
 ## Reading run data from another application
 
 `RunRepository(root)` reads the `.scissorhands/` tree in any explicitly selected project
@@ -182,7 +220,7 @@ framework, and it never creates directories or rewrites artifacts. Keep executio
 from dataclasses import asdict
 from pathlib import Path
 
-from scissorhands.core.run_repository import RunRepository
+from scissorhands.application import RunRepository
 
 repository = RunRepository(Path("/path/to/project"))
 work_items = repository.list_work_items()

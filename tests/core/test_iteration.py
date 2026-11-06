@@ -3,9 +3,9 @@ from datetime import datetime
 from unittest import TestCase
 
 from scissorhands.core.iteration import IterationRecord
-from scissorhands.core.receipts import receipt_data
 from scissorhands.core.status import CriterionStatus
 from scissorhands.core.verification import CommandResult, VerificationResult
+from scissorhands.storage.receipts import receipt_data
 
 COMPLETE = IterationRecord(
     iteration=1,

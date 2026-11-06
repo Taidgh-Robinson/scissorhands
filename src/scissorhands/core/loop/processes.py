@@ -6,6 +6,7 @@ import asyncio
 import codecs
 import os
 import signal
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -32,9 +33,14 @@ async def stop_process(process: asyncio.subprocess.Process) -> None:
 
 
 async def run_command(
-    command: list[str], prompt: str | None, log_path: Path, cwd: Path
+    command: list[str],
+    prompt: str | None,
+    log_path: Path,
+    cwd: Path,
+    *,
+    on_output: Callable[[str], None] | None = None,
 ) -> int:
-    """Run an agent while teeing its combined output to the terminal and a log."""
+    """Save combined output and optionally notify a caller as chunks arrive."""
     process = await asyncio.create_subprocess_exec(
         *command,
         cwd=cwd,
@@ -61,20 +67,17 @@ async def run_command(
         with log_path.open("w", encoding="utf-8") as log:
             while chunk := await process.stdout.read(8192):
                 output = decoder.decode(chunk)
-                print(output, end="", flush=True)
+                if on_output is not None:
+                    on_output(output)
                 await asyncio.to_thread(log.write, output)
                 await asyncio.to_thread(log.flush)
             tail = decoder.decode(b"", final=True)
             if tail:
-                print(tail, end="", flush=True)
+                if on_output is not None:
+                    on_output(tail)
                 await asyncio.to_thread(log.write, tail)
         await writer
         return await process.wait()
-    except asyncio.CancelledError:
-        await stop_process(process)
-        writer.cancel()
-        await asyncio.gather(writer, return_exceptions=True)
-        raise
     except BaseException:
         await stop_process(process)
         writer.cancel()

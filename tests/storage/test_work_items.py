@@ -2,7 +2,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
-from scissorhands.core.work_items import WorkItem, load_work_item
+from scissorhands.core.work_items import WorkItem
+from scissorhands.prompting.work_items import render_work_item
+from scissorhands.storage.work_items import load_work_item
 
 
 class WorkItemTests(TestCase):
@@ -44,7 +46,7 @@ non_goals = ["Do not add CSV export."]
 
             self.assertEqual(work_item.title, "Add export")
             self.assertEqual(work_item.id, "EXPORT-1")
-            prompt = work_item.as_prompt()
+            prompt = render_work_item(work_item)
             self.assertIn("## Definition of done\n\n- DoD-1: Tests pass.", prompt)
             self.assertIn(
                 "## Acceptance criteria\n\n- AC-1: The output is valid JSON.", prompt
@@ -92,7 +94,7 @@ acceptance_criteria = []
             acceptance_criteria=("Behavior is observable.",),
         )
 
-        prompt = work_item.as_prompt()
+        prompt = render_work_item(work_item)
 
         self.assertNotIn("## Relevant paths", prompt)
         self.assertNotIn("## Constraints", prompt)

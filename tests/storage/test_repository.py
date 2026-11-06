@@ -9,8 +9,9 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from scissorhands.core.run_repository import RunRepository, UnsafeArtifactPath
-from scissorhands.core.run_service import RunRequest, RunService
+from scissorhands.application import RunRequest, RunService
+from scissorhands.storage.paths import UnsafeArtifactPath
+from scissorhands.storage.repository import RunRepository
 
 
 class RunRepositoryTests(TestCase):
@@ -185,7 +186,7 @@ class RunRepositoryTests(TestCase):
     def test_json_limits_invalid_encoding_and_nonregular_files(self) -> None:
         path = self.run / "report.json"
         path.write_bytes(b'{"large":"0123456789"}')
-        with patch("scissorhands.core.run_repository.MAX_JSON_BYTES", 8):
+        with patch("scissorhands.storage.artifacts.MAX_JSON_BYTES", 8):
             self.assertEqual(self.repository.list_runs()[0].manifest_state, "too_large")
         path.write_bytes(b"\xff")
         self.assertEqual(self.repository.list_runs()[0].manifest_state, "invalid")

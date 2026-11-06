@@ -2,7 +2,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
-from scissorhands.core.status import CriterionStatus, format_status, read_status
+from scissorhands.core.status import CriterionStatus
+from scissorhands.storage.agent_state import read_status
 
 CHECKLIST = (("DoD-1", "Tests pass."), ("AC-1", "It works."))
 
@@ -47,22 +48,3 @@ class ReadStatusTests(TestCase):
 
             path.write_text("[]", encoding="utf-8")
             self.assertIsNone(read_status(path, CHECKLIST))
-
-
-class FormatStatusTests(TestCase):
-    def test_renders_a_checklist(self) -> None:
-        rendered = format_status(
-            (
-                CriterionStatus("DoD-1", "Tests pass.", True, "Ran tests."),
-                CriterionStatus("AC-1", "It works.", False),
-                CriterionStatus("AC-2", "It is fast.", None),
-            )
-        )
-
-        self.assertEqual(
-            rendered,
-            "[x] DoD-1: Tests pass.\n"
-            "      Ran tests.\n"
-            "[ ] AC-1: It works.\n"
-            "[?] AC-2: It is fast.",
-        )

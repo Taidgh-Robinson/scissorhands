@@ -2,13 +2,15 @@ import asyncio
 import json
 import shlex
 import sys
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import IsolatedAsyncioTestCase
 
-from scissorhands.core.execution import run_command
-from scissorhands.core.run_service import RunRequest, RunService
-from scissorhands.core.verification import run_verification
+from scissorhands.application import RunRequest, RunService
+from scissorhands.core.loop.processes import run_command
+from scissorhands.core.loop.verification import run_verification
 
 WORK_ITEM = """id = "ASYNC-1"
 title = "Test async runs"
@@ -29,10 +31,17 @@ class AsyncRunTests(IsolatedAsyncioTestCase):
                 "-c",
                 "import time; print('first', flush=True); time.sleep(.2); print('second', flush=True)",
             ]
-            task = asyncio.create_task(run_command(command, None, log, root))
-            await asyncio.wait_for(asyncio.sleep(0.02), timeout=0.1)
-            self.assertFalse(task.done())
-            self.assertEqual(await task, 0)
+            chunks = []
+            terminal = StringIO()
+            with redirect_stdout(terminal), redirect_stderr(terminal):
+                task = asyncio.create_task(
+                    run_command(command, None, log, root, on_output=chunks.append)
+                )
+                await asyncio.wait_for(asyncio.sleep(0.02), timeout=0.1)
+                self.assertFalse(task.done())
+                self.assertEqual(await task, 0)
+            self.assertEqual(terminal.getvalue(), "")
+            self.assertEqual("".join(chunks), "first\nsecond\n")
             self.assertEqual(log.read_text(), "first\nsecond\n")
 
     async def test_reservation_precedes_execution_and_cancellation_is_durable(

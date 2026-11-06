@@ -89,3 +89,13 @@ def evaluate_completion(record: IterationRecord) -> CompletionDecision:
     return CompletionDecision(
         "iteration_limit" if record.final_iteration else "continuing"
     )
+
+
+def run_outcome(records: list[IterationRecord]) -> str:
+    """Describe a finished run using the final iteration's completion decision."""
+    final = records[-1]
+    return (
+        final.decision.outcome
+        if final.decision.accepted or final.decision.outcome == "agent_failed"
+        else "iteration_limit"
+    )

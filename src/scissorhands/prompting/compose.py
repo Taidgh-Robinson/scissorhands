@@ -2,6 +2,7 @@
 
 from scissorhands.core.work_items import WorkItem
 from scissorhands.prompting.contract import default_contract, render_contract
+from scissorhands.prompting.work_items import render_work_item
 
 
 def compose_prompt(
@@ -43,4 +44,4 @@ failures before starting anything else:
         progress_path=progress_path,
         status_path=status_path,
     )
-    return f"{work_item.as_prompt()}\n{rendered}"
+    return f"{render_work_item(work_item)}\n{rendered}"
