@@ -303,3 +303,19 @@ The API reads run data and can write only to its project registry. It does not s
 or cancel runs. Keep it bound to localhost unless you add authentication: reports
 may contain saved prompts, logs, and patches from the registered folders.
 
+### Docker Compose
+
+```bash
+SCISSORHANDS_PROJECTS_ROOT=/absolute/path/to/projects docker compose up --build
+```
+
+Compose starts the API on `127.0.0.1:8000`, mounts the host project directory
+read-only at `/projects`, and persists the SQLite database in the `registry_data`
+volume. SQLite is embedded in the API process, so there is no separate database
+service. Register a container-visible path such as `/projects/my-project` through
+`POST /api/projects`. If the projects live in unrelated host directories, add more
+read-only bind mounts to a local Compose override file and register each mounted
+path. The default project mount is the current repository when
+`SCISSORHANDS_PROJECTS_ROOT` is unset. The registry volume survives container
+restarts and rebuilds; project run artifacts always stay on the host mounts.
+

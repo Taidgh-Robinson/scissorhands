@@ -1,0 +1,16 @@
+services:
+  api:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      SCISSORHANDS_REGISTRY_DB: /data/projects.sqlite3
+    volumes:
+      - registry_data:/data
+      - type: bind
+        source: ${SCISSORHANDS_PROJECTS_ROOT:-.}
+        target: /projects
+        read_only: true
+
+volumes:
+  registry_data:
