@@ -28,11 +28,17 @@ class Project:
 
     @property
     def available(self) -> bool:
-        return (
-            self.root.is_dir()
-            and not self.root.is_symlink()
-            and not (self.root / ".scissorhands").is_symlink()
-        )
+        # The stored root was canonical at registration. Recheck ancestors too:
+        # replacing a parent with a symlink must not redirect this project ID.
+        try:
+            return (
+                self.root.resolve(strict=True) == self.root
+                and self.root.is_dir()
+                and not self.root.is_symlink()
+                and not (self.root / ".scissorhands").is_symlink()
+            )
+        except (OSError, RuntimeError):
+            return False
 
 
 def default_registry_path() -> Path:
@@ -72,7 +78,9 @@ class ProjectRegistry:
             try:
                 version = connection.execute("PRAGMA user_version").fetchone()[0]
                 if version > SCHEMA_VERSION:
-                    raise RuntimeError(f"Unsupported project registry version: {version}")
+                    raise RuntimeError(
+                        f"Unsupported project registry version: {version}"
+                    )
                 if version < 1:
                     connection.execute(
                         """CREATE TABLE projects (
@@ -95,7 +103,9 @@ class ProjectRegistry:
         project_name = (resolved.name if name is None else name).strip()
         if not project_name:
             raise ValueError("Project name must not be empty")
-        project = Project(str(uuid4()), project_name, resolved, datetime.now(UTC).isoformat())
+        project = Project(
+            str(uuid4()), project_name, resolved, datetime.now(UTC).isoformat()
+        )
         with self._connection() as connection:
             try:
                 connection.execute(
@@ -104,7 +114,9 @@ class ProjectRegistry:
                 )
                 connection.commit()
             except sqlite3.IntegrityError as error:
-                raise DuplicateProjectError(f"Project already registered: {resolved}") from error
+                raise DuplicateProjectError(
+                    f"Project already registered: {resolved}"
+                ) from error
         return project
 
     def list(self) -> tuple[Project, ...]:
@@ -124,7 +136,9 @@ class ProjectRegistry:
 
     def remove(self, project_id: str) -> bool:
         with self._connection() as connection:
-            cursor = connection.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+            cursor = connection.execute(
+                "DELETE FROM projects WHERE id = ?", (project_id,)
+            )
             connection.commit()
         return cursor.rowcount != 0
 

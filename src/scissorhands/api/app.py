@@ -16,11 +16,14 @@ from scissorhands.api.registry import (
 )
 from scissorhands.api.schemas import (
     ArtifactResponse,
-    ListedRunResponse,
+    ErrorResponse,
+    LoopArtifactKind,
     LoopDetailResponse,
     ProjectInput,
     ProjectResponse,
+    RunArtifactKind,
     RunDetailResponse,
+    RunListResponse,
     RunSummaryResponse,
 )
 from scissorhands.application import RunRepository
@@ -32,6 +35,21 @@ def _registry(request: Request) -> ProjectRegistry:
 
 
 Registry = Annotated[ProjectRegistry, Depends(_registry)]
+
+READ_ERRORS = {
+    400: {
+        "model": ErrorResponse,
+        "description": "Invalid artifact options or storage path",
+    },
+    404: {
+        "model": ErrorResponse,
+        "description": "Project, work item, run, or loop not found",
+    },
+    409: {
+        "model": ErrorResponse,
+        "description": "Project folder unavailable or unreadable",
+    },
+}
 
 
 def create_app(registry_path: Path | None = None) -> FastAPI:
@@ -48,7 +66,9 @@ def create_app(registry_path: Path | None = None) -> FastAPI:
     def repository(project_id: str, projects: ProjectRegistry) -> RunRepository:
         project = project_or_404(project_id, projects)
         if not project.available:
-            raise HTTPException(status.HTTP_409_CONFLICT, "Project folder is unavailable")
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Project folder is unavailable"
+            )
         return RunRepository(project.root)
 
     def query(action):
@@ -56,6 +76,10 @@ def create_app(registry_path: Path | None = None) -> FastAPI:
             return action()
         except FileNotFoundError as error:
             raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from error
+        except OSError as error:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Project storage is unreadable"
+            ) from error
         except ValueError as error:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
 
@@ -67,63 +91,107 @@ def create_app(registry_path: Path | None = None) -> FastAPI:
         "/api/projects",
         response_model=ProjectResponse,
         status_code=status.HTTP_201_CREATED,
+        responses={
+            400: {
+                "model": ErrorResponse,
+                "description": "Invalid or inaccessible project path or name",
+            },
+            409: {"model": ErrorResponse, "description": "Project already registered"},
+        },
     )
     def add_project(body: ProjectInput, projects: Registry):
         if not Path(body.path).is_absolute():
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Project path must be absolute")
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "Project path must be absolute"
+            )
         try:
             project = projects.add(Path(body.path), name=body.name)
         except DuplicateProjectError as error:
             raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
         except (FileNotFoundError, ValueError) as error:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
+        except (OSError, RuntimeError) as error:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "Project path is inaccessible"
+            ) from error
         return _project_payload(project)
 
-    @app.get("/api/projects/{project_id}", response_model=ProjectResponse)
+    @app.get(
+        "/api/projects/{project_id}",
+        response_model=ProjectResponse,
+        responses={404: READ_ERRORS[404]},
+    )
     def get_project(project_id: str, projects: Registry):
         return _project_payload(project_or_404(project_id, projects))
 
-    @app.delete("/api/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+    @app.delete(
+        "/api/projects/{project_id}",
+        status_code=status.HTTP_204_NO_CONTENT,
+        responses={404: READ_ERRORS[404]},
+    )
     def remove_project(project_id: str, projects: Registry):
         if not projects.remove(project_id):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Project not found")
 
-    @app.get("/api/runs", response_model=list[ListedRunResponse])
+    @app.get(
+        "/api/runs",
+        response_model=RunListResponse,
+        description="Return readable projects' runs and per-project read errors. A failed project contributes no runs.",
+    )
     def list_all_runs(projects: Registry):
         runs = []
+        errors = []
         for project in projects.list():
-            if not project.available:
+            try:
+                summaries = query(
+                    lambda project=project: repository(project.id, projects).list_runs()
+                )
+            except HTTPException as error:
+                errors.append(
+                    {
+                        "project_id": project.id,
+                        "status_code": error.status_code,
+                        "detail": error.detail,
+                    }
+                )
                 continue
-            summaries = query(lambda root=project.root: RunRepository(root).list_runs())
             runs.extend({"project_id": project.id, **asdict(run)} for run in summaries)
-        return runs
+        return {"runs": runs, "errors": errors}
 
-    @app.get("/api/projects/{project_id}/work-items", response_model=list[str])
+    @app.get(
+        "/api/projects/{project_id}/work-items",
+        response_model=list[str],
+        responses=READ_ERRORS,
+    )
     def list_work_items(project_id: str, projects: Registry):
         return query(lambda: repository(project_id, projects).list_work_items())
 
     @app.get(
-        "/api/projects/{project_id}/runs", response_model=list[RunSummaryResponse]
+        "/api/projects/{project_id}/runs",
+        response_model=list[RunSummaryResponse],
+        responses=READ_ERRORS,
     )
     def list_project_runs(
         project_id: str, projects: Registry, work_item_id: str | None = None
     ):
-        runs = query(
-            lambda: repository(project_id, projects).list_runs(work_item_id)
-        )
+        runs = query(lambda: repository(project_id, projects).list_runs(work_item_id))
         return [asdict(run) for run in runs]
 
-    run_prefix = (
-        "/api/projects/{project_id}/work-items/{work_item_id}/runs/{run_id}"
-    )
+    run_prefix = "/api/projects/{project_id}/work-items/{work_item_id}/runs/{run_id}"
 
-    @app.get(run_prefix, response_model=RunDetailResponse)
+    @app.get(run_prefix, response_model=RunDetailResponse, responses=READ_ERRORS)
     def get_run(project_id: str, work_item_id: str, run_id: str, projects: Registry):
         return asdict(
-            query(lambda: repository(project_id, projects).read_run(work_item_id, run_id))
+            query(
+                lambda: repository(project_id, projects).read_run(work_item_id, run_id)
+            )
         )
 
-    @app.get(run_prefix + "/loops/{number}", response_model=LoopDetailResponse)
+    @app.get(
+        run_prefix + "/loops/{number}",
+        response_model=LoopDetailResponse,
+        responses=READ_ERRORS,
+    )
     def get_loop(
         project_id: str, work_item_id: str, run_id: str, number: int, projects: Registry
     ):
@@ -163,32 +231,43 @@ def create_app(registry_path: Path | None = None) -> FastAPI:
             )
         )
 
-    @app.get(run_prefix + "/artifacts/{kind}", response_model=ArtifactResponse)
+    @app.get(
+        run_prefix + "/artifacts/{kind}",
+        response_model=ArtifactResponse,
+        responses=READ_ERRORS,
+    )
     def get_run_artifact(
         project_id: str,
         work_item_id: str,
         run_id: str,
-        kind: str,
+        kind: RunArtifactKind,
         projects: Registry,
         offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=MAX_TEXT_BYTES)] = DEFAULT_TEXT_BYTES,
         tail: bool = False,
     ):
         return artifact(
-            project_id, work_item_id, run_id, kind, projects,
-            offset=offset, limit=limit, tail=tail,
+            project_id,
+            work_item_id,
+            run_id,
+            kind,
+            projects,
+            offset=offset,
+            limit=limit,
+            tail=tail,
         )
 
     @app.get(
         run_prefix + "/loops/{number}/artifacts/{kind}",
         response_model=ArtifactResponse,
+        responses=READ_ERRORS,
     )
     def get_loop_artifact(
         project_id: str,
         work_item_id: str,
         run_id: str,
         number: int,
-        kind: str,
+        kind: LoopArtifactKind,
         projects: Registry,
         verification: Annotated[int | None, Query(ge=1)] = None,
         offset: Annotated[int, Query(ge=0)] = 0,
@@ -196,8 +275,16 @@ def create_app(registry_path: Path | None = None) -> FastAPI:
         tail: bool = False,
     ):
         return artifact(
-            project_id, work_item_id, run_id, kind, projects,
-            loop=number, verification=verification, offset=offset, limit=limit, tail=tail,
+            project_id,
+            work_item_id,
+            run_id,
+            kind,
+            projects,
+            loop=number,
+            verification=verification,
+            offset=offset,
+            limit=limit,
+            tail=tail,
         )
 
     return app

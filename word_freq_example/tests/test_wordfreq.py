@@ -1,13 +1,12 @@
 """Unit and command-line tests for wordfreq."""
 
 import json
-from pathlib import Path
 import subprocess
 import sys
 import unittest
+from pathlib import Path
 
 from wordfreq import count_words
-
 
 SCRIPT = Path(__file__).resolve().parents[1] / "wordfreq.py"
 
@@ -26,7 +25,9 @@ class CountWordsTests(unittest.TestCase):
         self.assertEqual(count_words("apple_pear123apple"), {"apple": 2, "pear": 1})
 
     def test_unicode_letters_and_casefolding(self):
-        self.assertEqual(count_words("CAFÉ café Straße STRASSE"), {"café": 2, "strasse": 2})
+        self.assertEqual(
+            count_words("CAFÉ café Straße STRASSE"), {"café": 2, "strasse": 2}
+        )
 
     def test_whitespace_and_empty_input(self):
         self.assertEqual(count_words("pear\napple\tpear"), {"pear": 2, "apple": 1})
@@ -64,7 +65,9 @@ class CommandLineTests(unittest.TestCase):
                 plain = self.run_cli(text)
                 expected = {
                     word: int(count)
-                    for word, count in (line.split() for line in plain.stdout.splitlines())
+                    for word, count in (
+                        line.split() for line in plain.stdout.splitlines()
+                    )
                 }
                 self.assertEqual(result.returncode, 0)
                 self.assertEqual(plain.returncode, 0)

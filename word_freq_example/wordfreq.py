@@ -1,9 +1,9 @@
 """Count words from standard input using Python 3.12 or newer."""
 
 import argparse
-from collections import Counter
 import json
 import sys
+from collections import Counter
 
 
 def count_words(text: str) -> Counter[str]:
@@ -14,7 +14,9 @@ def count_words(text: str) -> Counter[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
-    parser.add_argument("--json", action="store_true", help="print counts as a JSON object")
+    parser.add_argument(
+        "--json", action="store_true", help="print counts as a JSON object"
+    )
     args = parser.parse_args()
 
     counts = count_words(sys.stdin.read())
