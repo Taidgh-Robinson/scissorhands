@@ -151,6 +151,7 @@ src/scissorhands/
     models.py         Run requests and previews
     runs.py           Validation, preview, reservation, and async execution
   cli/                Argument parsing, command entry point, terminal output
+  api/                Project registry, HTTP reporting routes, and local server
   core/               Work-item, criterion, iteration, and verification models
     loop/             Orchestration, iteration execution, subprocesses, observers
   storage/            Project layout and filesystem operations
@@ -174,13 +175,10 @@ The interface boundary is `scissorhands.application`:
 from scissorhands.application import RunObserver, RunRepository, RunRequest, RunService
 ```
 
-A future `src/scissorhands/api/` package should contain HTTP application setup, routes,
-request/response schemas, dependency wiring, and HTTP error translation. Its handlers
-call these shared operations with the selected project root. Run management policy
-belongs in `application/`, loop decisions in `core/`, and file access in `storage/`.
-This keeps the API from duplicating validation, parsing artifacts, constructing agent
-commands, or implementing completion rules. Neither the backend nor its models import
-the CLI or an HTTP framework; architecture tests guard this boundary.
+The reporting API in `src/scissorhands/api/` uses these shared operations with each
+registered project's root. Run management policy belongs in `application/`, loop
+decisions in `core/`, and file access in `storage/`. Neither the backend nor its
+models import the CLI or an HTTP framework; architecture tests guard this boundary.
 
 The CLI command and on-disk artifact formats are unchanged. Python imports from the old
 `core.run_service`, `core.run_repository`, and `core.runner` modules should migrate to
@@ -263,8 +261,45 @@ with a maximum of 1 MiB per call. Use `offset` and `limit` for byte windows, or
 observed total size, and truncation flag. Invalid or split UTF-8 characters are replaced.
 Files are read independently, so active-run responses are not an atomic snapshot.
 
-Repository methods perform synchronous filesystem I/O. An async API should call them
-through a worker thread (for example, `await asyncio.to_thread(repository.list_runs)`)
-and map their results and errors to HTTP responses. Project registration, HTTP routes,
-and background task ownership remain responsibilities of that future application layer.
+Repository methods perform synchronous filesystem I/O. FastAPI runs the synchronous
+reporting handlers in a worker thread and maps repository errors to HTTP responses.
+
+## Reporting API
+
+Install the optional web dependencies and start the local server:
+
+```bash
+uv sync --extra api
+uv run --extra api scissorhands-api
+```
+
+The server listens on `127.0.0.1:8000` by default. Its interactive API reference is
+at `http://127.0.0.1:8000/docs`. A user-level SQLite file stores project registrations;
+set `SCISSORHANDS_REGISTRY_DB` or pass `--registry-db` to choose another location.
+Only project IDs, names, paths, and registration times go in this database. Reports
+remain in each project's `.scissorhands/` tree.
+
+Register as many project folders as needed with `POST /api/projects`:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/projects \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"/absolute/path/to/project"}'
+curl http://127.0.0.1:8000/api/projects
+curl http://127.0.0.1:8000/api/runs
+```
+
+The registration response contains an opaque project `id`. Use it in
+`GET /api/projects/{project_id}/runs` or the run-detail route
+`GET /api/projects/{project_id}/work-items/{work_item_id}/runs/{run_id}`.
+Run details list loop numbers. Append `/loops/{number}` to read a loop receipt,
+`/artifacts/{kind}` for a run artifact, or `/loops/{number}/artifacts/{kind}` for a
+loop artifact. Text artifacts support byte `offset`, `limit`, and `tail` parameters.
+Missing or damaged artifacts have an explicit `state` in the response. The
+`GET /api/runs` route combines runs from every available registered project.
+`DELETE /api/projects/{project_id}` removes a registration without deleting run files.
+
+The API reads run data and can write only to its project registry. It does not start
+or cancel runs. Keep it bound to localhost unless you add authentication: reports
+may contain saved prompts, logs, and patches from the registered folders.
 

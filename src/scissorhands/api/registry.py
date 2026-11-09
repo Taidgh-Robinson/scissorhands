@@ -28,7 +28,11 @@ class Project:
 
     @property
     def available(self) -> bool:
-        return self.root.is_dir() and not self.root.is_symlink()
+        return (
+            self.root.is_dir()
+            and not self.root.is_symlink()
+            and not (self.root / ".scissorhands").is_symlink()
+        )
 
 
 def default_registry_path() -> Path:
