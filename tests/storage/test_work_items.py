@@ -4,7 +4,11 @@ from unittest import TestCase
 
 from scissorhands.core.work_items import WorkItem
 from scissorhands.prompting.work_items import render_work_item
-from scissorhands.storage.work_items import load_work_item
+from scissorhands.storage.work_items import (
+    build_work_item,
+    dump_work_item,
+    load_work_item,
+)
 
 
 class WorkItemTests(TestCase):
@@ -143,3 +147,64 @@ non_goals = []
                 ("AC-1", "Behavior is observable."),
             ),
         )
+
+    def test_dump_work_item_round_trips_through_load_work_item(self) -> None:
+        work_item = WorkItem(
+            id="EXPORT-1",
+            title='Add "export" support',
+            description="Export records as JSON.\nHandle errors gracefully.",
+            definition_of_done=("Tests pass.",),
+            acceptance_criteria=("The output is valid JSON.",),
+            constraints=("Use the standard library.",),
+            verification=("python -m unittest",),
+            relevant_paths=("src/export.py",),
+            non_goals=("Do not add CSV export.",),
+        )
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "work-item.toml"
+            path.write_text(dump_work_item(work_item), encoding="utf-8")
+
+            self.assertEqual(load_work_item(path), work_item)
+
+    def test_dump_work_item_renders_empty_optional_arrays(self) -> None:
+        work_item = WorkItem(
+            id="SMALL-1",
+            title="Small change",
+            description="Make the change.",
+            definition_of_done=("Tests pass.",),
+            acceptance_criteria=("Behavior is observable.",),
+        )
+
+        text = dump_work_item(work_item)
+
+        self.assertIn('id = "SMALL-1"', text)
+        self.assertIn("constraints = []", text)
+        self.assertIn("non_goals = []", text)
+        self.assertIn("verification = []", text)
+        self.assertIn("relevant_paths = []", text)
+
+    def test_build_work_item_validates_plain_mappings(self) -> None:
+        with self.assertRaisesRegex(ValueError, "acceptance_criteria"):
+            build_work_item(
+                {
+                    "id": "FIELD-1",
+                    "title": "Title",
+                    "description": "Description.",
+                    "definition_of_done": ["Done."],
+                    "acceptance_criteria": [],
+                },
+                source="request body",
+            )
+
+        work_item = build_work_item(
+            {
+                "id": "FIELD-1",
+                "title": " Title ",
+                "description": "Description.",
+                "definition_of_done": ["Done."],
+                "acceptance_criteria": ["Works."],
+            },
+            source="request body",
+        )
+        self.assertEqual(work_item.title, "Title")

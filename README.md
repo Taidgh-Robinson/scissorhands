@@ -303,6 +303,33 @@ Missing or damaged artifacts have an explicit `state` in the response. The
 `GET /api/runs` route combines runs from every readable registered project.
 `DELETE /api/projects/{project_id}` removes a registration without deleting run files.
 
+`POST /api/projects/{project_id}/work-items` generates a structured work item and writes it
+into that project as TOML. Send the same fields as `WORK_ITEM.toml` (`id`, `title`,
+`description`, `definition_of_done`, `acceptance_criteria`, and the optional `constraints`,
+`verification`, `relevant_paths`, `non_goals` arrays), validated with the same rules the CLI
+applies when loading a work item:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/projects/$PROJECT_ID/work-items \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "id": "EXPORT-1",
+    "title": "Add export",
+    "description": "Export records as JSON.",
+    "definition_of_done": ["Tests pass."],
+    "acceptance_criteria": ["The output is valid JSON."]
+  }'
+```
+
+By default this writes `WORK_ITEM.toml` at the project root, matching the CLI's default
+`--work-item` path. Pass a relative `path` to write elsewhere (parent directories are created
+as needed); the path must stay inside the project and may not point through a symlink. The
+file is not overwritten unless the request also sets `"overwrite": true`, in which case it
+replaces the existing file. The response includes the destination `path`, the rendered
+`toml` text, and the validated `work_item` fields. Validation failures (empty required
+fields, a malformed `id`) return 400; an unsafe or escaping `path` also returns 400; an
+existing file without `overwrite` returns 409.
+
 The combined listing returns an object with `runs` and `errors` arrays (rather than
 a bare run array). Each error includes `project_id`, `status_code`, and `detail`:
 
@@ -333,9 +360,11 @@ byte-window bounds. Missing or damaged artifact files themselves remain HTTP 200
 with an explicit artifact `state`. OpenAPI lists artifact kinds, states, and error
 responses; artifact kinds are specific to run or loop routes.
 
-The API reads run data and can write only to its project registry. It does not start
+The API reads run data, maintains its project registry, and can write a generated
+`work_items` TOML file into a registered project (never anywhere else). It does not start
 or cancel runs. Keep it bound to localhost unless you add authentication: reports
-may contain saved prompts, logs, and patches from the registered folders.
+may contain saved prompts, logs, and patches from the registered folders, and the
+work-item endpoint will write files into those folders on request.
 
 ### Development checks
 
