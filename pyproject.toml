@@ -8,6 +8,13 @@ dependencies = []
 
 [project.scripts]
 scissorhands = "scissorhands.cli:main"
+scissorhands-api = "scissorhands.api.server:main"
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.162.2",
+    "uvicorn>=0.54.0",
+]
 
 [build-system]
 requires = ["uv_build>=0.9.18,<0.10.0"]
@@ -18,6 +25,7 @@ package = true
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "ruff>=0.17.3",
 ]
 

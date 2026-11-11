@@ -1,0 +1,35 @@
+id = "123"
+title = "Build a word-frequency command-line program"
+
+description = """
+Create a small Python command-line program named wordfreq.py. It should read text from standard
+input, count words case-insensitively, and print the counts. Include automated tests and concise
+usage documentation.
+"""
+
+definition_of_done = [
+  "The implementation is complete and uses only the Python standard library.",
+  "Automated unit tests cover the important behavior and pass.",
+  "README.md documents usage with examples.",
+]
+
+acceptance_criteria = [
+  "Given 'Pear pear apple!' on standard input, the program prints 'apple 1' and 'pear 2' in alphabetical order.",
+  "Punctuation is excluded from words and matching is case-insensitive.",
+  "Passing --json produces a valid JSON object containing the same counts.",
+  "Passing an unknown command-line option exits non-zero and writes an error to stderr.",
+]
+
+constraints = [
+  "Support Python 3.12 or newer.",
+  "Do not add third-party dependencies.",
+  "Keep the program small and readable.",
+]
+
+non_goals = [
+  "Do not add a graphical interface or persistent database.",
+]
+
+verification = [
+  "python -m unittest discover -s tests -v",
+]

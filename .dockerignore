@@ -1,0 +1,9 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+**/.scissorhands
+.DS_Store
+word_freq_example
+tests
+docs/planning

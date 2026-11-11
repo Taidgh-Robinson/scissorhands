@@ -151,6 +151,7 @@ src/scissorhands/
     models.py         Run requests and previews
     runs.py           Validation, preview, reservation, and async execution
   cli/                Argument parsing, command entry point, terminal output
+  api/                Project registry, HTTP reporting routes, and local server
   core/               Work-item, criterion, iteration, and verification models
     loop/             Orchestration, iteration execution, subprocesses, observers
   storage/            Project layout and filesystem operations
@@ -174,13 +175,10 @@ The interface boundary is `scissorhands.application`:
 from scissorhands.application import RunObserver, RunRepository, RunRequest, RunService
 ```
 
-A future `src/scissorhands/api/` package should contain HTTP application setup, routes,
-request/response schemas, dependency wiring, and HTTP error translation. Its handlers
-call these shared operations with the selected project root. Run management policy
-belongs in `application/`, loop decisions in `core/`, and file access in `storage/`.
-This keeps the API from duplicating validation, parsing artifacts, constructing agent
-commands, or implementing completion rules. Neither the backend nor its models import
-the CLI or an HTTP framework; architecture tests guard this boundary.
+The reporting API in `src/scissorhands/api/` uses these shared operations with each
+registered project's root. Run management policy belongs in `application/`, loop
+decisions in `core/`, and file access in `storage/`. Neither the backend nor its
+models import the CLI or an HTTP framework; architecture tests guard this boundary.
 
 The CLI command and on-disk artifact formats are unchanged. Python imports from the old
 `core.run_service`, `core.run_repository`, and `core.runner` modules should migrate to
@@ -232,8 +230,12 @@ if runs:
     if detail.loops:
         loop = repository.read_loop(run.work_item_id, run.run_id, detail.loops[-1])
         output = repository.read_artifact(
-            run.work_item_id, run.run_id, "agent_output",
-            loop=loop.number, tail=True, limit=16_384,
+            run.work_item_id,
+            run.run_id,
+            "agent_output",
+            loop=loop.number,
+            tail=True,
+            limit=16_384,
         )
 ```
 
@@ -263,8 +265,109 @@ with a maximum of 1 MiB per call. Use `offset` and `limit` for byte windows, or
 observed total size, and truncation flag. Invalid or split UTF-8 characters are replaced.
 Files are read independently, so active-run responses are not an atomic snapshot.
 
-Repository methods perform synchronous filesystem I/O. An async API should call them
-through a worker thread (for example, `await asyncio.to_thread(repository.list_runs)`)
-and map their results and errors to HTTP responses. Project registration, HTTP routes,
-and background task ownership remain responsibilities of that future application layer.
+Repository methods perform synchronous filesystem I/O. FastAPI runs the synchronous
+reporting handlers in a worker thread and maps repository errors to HTTP responses.
+
+## Reporting API
+
+Install the optional web dependencies and start the local server:
+
+```bash
+uv sync --extra api
+uv run --extra api scissorhands-api
+```
+
+The server listens on `127.0.0.1:8000` by default. Its interactive API reference is
+at `http://127.0.0.1:8000/docs`. A user-level SQLite file stores project registrations;
+set `SCISSORHANDS_REGISTRY_DB` or pass `--registry-db` to choose another location.
+Only project IDs, names, paths, and registration times go in this database. Reports
+remain in each project's `.scissorhands/` tree.
+
+Register as many project folders as needed with `POST /api/projects`:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/projects \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"/absolute/path/to/project"}'
+curl http://127.0.0.1:8000/api/projects
+curl http://127.0.0.1:8000/api/runs
+```
+
+The registration response contains an opaque project `id`. Use it in
+`GET /api/projects/{project_id}/runs` or the run-detail route
+`GET /api/projects/{project_id}/work-items/{work_item_id}/runs/{run_id}`.
+Run details list loop numbers. Append `/loops/{number}` to read a loop receipt,
+`/artifacts/{kind}` for a run artifact, or `/loops/{number}/artifacts/{kind}` for a
+loop artifact. Text artifacts support byte `offset`, `limit`, and `tail` parameters.
+Missing or damaged artifacts have an explicit `state` in the response. The
+`GET /api/runs` route combines runs from every readable registered project.
+`DELETE /api/projects/{project_id}` removes a registration without deleting run files.
+
+The combined listing returns an object with `runs` and `errors` arrays (rather than
+a bare run array). Each error includes `project_id`, `status_code`, and `detail`:
+
+```json
+{
+  "runs": [],
+  "errors": [
+    {"project_id": "unavailable-project-id", "status_code": 409,
+     "detail": "Project folder is unavailable"}
+  ]
+}
+```
+
+A failed project contributes no runs; other projects remain readable. The response
+is HTTP 200 even when all projects fail, so clients should always inspect `errors`.
+An empty registry returns `{"runs": [], "errors": []}`. Project-specific run listings
+still return a bare array. Registrations retain their canonical root: if a parent
+directory is later redirected by a symlink, the project becomes unavailable.
+Availability is a filesystem observation, not a guarantee that a subsequent read
+will succeed; read failures are reported separately.
+
+Errors on individual requests use `{"detail": "..."}`: HTTP 400 for invalid
+registration paths or artifact option combinations, 404 for unknown project IDs or
+missing work-item/run/loop directories, and 409 for duplicate registrations or
+unavailable/unreadable project storage. Request validation errors use HTTP 422 with
+FastAPI's structured `detail` array, including unknown artifact kinds and invalid
+byte-window bounds. Missing or damaged artifact files themselves remain HTTP 200
+with an explicit artifact `state`. OpenAPI lists artifact kinds, states, and error
+responses; artifact kinds are specific to run or loop routes.
+
+The API reads run data and can write only to its project registry. It does not start
+or cancel runs. Keep it bound to localhost unless you add authentication: reports
+may contain saved prompts, logs, and patches from the registered folders.
+
+### Development checks
+
+Run the full suite with the API extra installed before merging reporting changes:
+
+```bash
+uv sync --locked --extra api
+uv run --extra api python -m unittest discover -s tests -v
+uv run ruff check .
+uv run ruff format --check .
+```
+
+The `Checks` workflow runs API tests, CLI tests without API dependencies, example
+tests, lint, and formatting on pull requests. Configure `API tests`,
+`CLI without API dependencies`, and `Lint and formatting` as required status checks
+in the repository's branch protection settings. The API job verifies its dependencies
+before discovery so missing dependencies cannot silently skip HTTP coverage.
+Local CLI-only installations can still run the base suite with HTTP tests skipped.
+
+### Docker Compose
+
+```bash
+SCISSORHANDS_PROJECTS_ROOT=/absolute/path/to/projects docker compose up --build
+```
+
+Compose starts the API on `127.0.0.1:8000`, mounts the host project directory
+read-only at `/projects`, and persists the SQLite database in the `registry_data`
+volume. SQLite is embedded in the API process, so there is no separate database
+service. Register a container-visible path such as `/projects/my-project` through
+`POST /api/projects`. If the projects live in unrelated host directories, add more
+read-only bind mounts to a local Compose override file and register each mounted
+path. The default project mount is the current repository when
+`SCISSORHANDS_PROJECTS_ROOT` is unset. The registry volume survives container
+restarts and rebuilds; project run artifacts always stay on the host mounts.
 
