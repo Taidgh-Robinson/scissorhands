@@ -2,7 +2,7 @@
 
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 ArtifactState = Literal[
     "available", "missing", "invalid", "unavailable", "unsafe", "too_large"
@@ -89,3 +89,29 @@ class LoopDetailResponse(BaseModel):
     run_id: str
     number: int
     receipt: ArtifactResponse
+
+
+class WorkItemInput(BaseModel):
+    """Structured fields matching `scissorhands.core.work_items.WorkItem`.
+
+    Field-level rules (non-empty strings, stripped whitespace, id format) are
+    enforced once, by the same validation TOML loading uses, not duplicated here.
+    """
+
+    id: str
+    title: str
+    description: str
+    definition_of_done: list[str] = Field(min_length=1)
+    acceptance_criteria: list[str] = Field(min_length=1)
+    constraints: list[str] = Field(default_factory=list)
+    verification: list[str] = Field(default_factory=list)
+    relevant_paths: list[str] = Field(default_factory=list)
+    non_goals: list[str] = Field(default_factory=list)
+    path: str = "WORK_ITEM.toml"
+    overwrite: bool = False
+
+
+class WorkItemCreateResponse(BaseModel):
+    path: str
+    toml: str
+    work_item: dict[str, Any]

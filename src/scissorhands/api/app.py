@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import Annotated
@@ -25,9 +26,12 @@ from scissorhands.api.schemas import (
     RunDetailResponse,
     RunListResponse,
     RunSummaryResponse,
+    WorkItemCreateResponse,
+    WorkItemInput,
 )
 from scissorhands.application import RunRepository
 from scissorhands.storage.artifacts import DEFAULT_TEXT_BYTES, MAX_TEXT_BYTES
+from scissorhands.storage.work_items import build_work_item, dump_work_item
 
 
 def _registry(request: Request) -> ProjectRegistry:
@@ -165,6 +169,88 @@ def create_app(registry_path: Path | None = None) -> FastAPI:
     )
     def list_work_items(project_id: str, projects: Registry):
         return query(lambda: repository(project_id, projects).list_work_items())
+
+    @app.post(
+        "/api/projects/{project_id}/work-items",
+        response_model=WorkItemCreateResponse,
+        status_code=status.HTTP_201_CREATED,
+        responses={
+            400: {
+                "model": ErrorResponse,
+                "description": "Invalid work-item fields or destination path",
+            },
+            404: READ_ERRORS[404],
+            409: {
+                "model": ErrorResponse,
+                "description": "Project unavailable, or the file exists and overwrite was not set",
+            },
+        },
+    )
+    def add_work_item(project_id: str, body: WorkItemInput, projects: Registry):
+        project = project_or_404(project_id, projects)
+        if not project.available:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Project folder is unavailable"
+            )
+
+        fields = body.model_dump(exclude={"path", "overwrite"})
+        try:
+            work_item = build_work_item(fields, source="request body")
+        except ValueError as error:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
+
+        candidate = Path(body.path)
+        if candidate.is_absolute():
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "path must be relative to the project"
+            )
+        target = (project.root / candidate).resolve()
+        if not target.is_relative_to(project.root):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "path must stay within the project"
+            )
+        if target.is_symlink():
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST, "path must not be a symlink"
+            )
+        if target.is_dir():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "path is a directory")
+        if target.exists() and not body.overwrite:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "File already exists; pass overwrite=true to replace it",
+            )
+
+        text = dump_work_item(work_item)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if body.overwrite:
+                temporary = target.with_name(f"{target.name}.tmp")
+                temporary.write_text(text, encoding="utf-8")
+                temporary.replace(target)
+            else:
+                # O_EXCL makes "already exists" an atomic check, closing the race
+                # between the precheck above and this write.
+                fd = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+                try:
+                    os.write(fd, text.encode("utf-8"))
+                finally:
+                    os.close(fd)
+        except FileExistsError:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "File already exists; pass overwrite=true to replace it",
+            ) from None
+        except OSError as error:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Unable to write work item file"
+            ) from error
+
+        return {
+            "path": str(target.relative_to(project.root)),
+            "toml": text,
+            "work_item": asdict(work_item),
+        }
 
     @app.get(
         "/api/projects/{project_id}/runs",

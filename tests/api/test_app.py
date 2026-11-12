@@ -266,3 +266,123 @@ class ReportingApiTests(TestCase):
         self.assertIn(
             "unknown", models["RunSummaryResponse"]["properties"]["state"]["enum"]
         )
+
+    def minimal_work_item(self, **overrides: object) -> dict:
+        body = {
+            "id": "GEN-1",
+            "title": "Generated item",
+            "description": "Do the thing.",
+            "definition_of_done": ["Tests pass."],
+            "acceptance_criteria": ["It works."],
+        }
+        body.update(overrides)
+        return body
+
+    def test_create_work_item_writes_validated_toml_by_default_path(self) -> None:
+        from scissorhands.storage.work_items import load_work_item
+
+        project = self.register(self.first)
+        response = self.client.post(
+            f"/api/projects/{project['id']}/work-items",
+            json=self.minimal_work_item(
+                constraints=["Keep it simple."], relevant_paths=["src/"]
+            ),
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        body = response.json()
+        self.assertEqual(body["path"], "WORK_ITEM.toml")
+        self.assertEqual(body["work_item"]["id"], "GEN-1")
+        self.assertEqual(body["work_item"]["constraints"], ["Keep it simple."])
+
+        written = self.first / "WORK_ITEM.toml"
+        self.assertEqual(written.read_text(encoding="utf-8"), body["toml"])
+        reloaded = load_work_item(written)
+        self.assertEqual(reloaded.id, "GEN-1")
+        self.assertEqual(reloaded.relevant_paths, ("src/",))
+
+    def test_create_work_item_respects_overwrite_and_custom_path(self) -> None:
+        project = self.register(self.first)
+        url = f"/api/projects/{project['id']}/work-items"
+        first = self.client.post(url, json=self.minimal_work_item(path="tasks/a.toml"))
+        self.assertEqual(first.status_code, 201, first.text)
+        self.assertTrue((self.first / "tasks" / "a.toml").is_file())
+
+        duplicate = self.client.post(
+            url, json=self.minimal_work_item(path="tasks/a.toml")
+        )
+        self.assertEqual(duplicate.status_code, 409)
+
+        replaced = self.client.post(
+            url,
+            json=self.minimal_work_item(
+                path="tasks/a.toml", overwrite=True, title="Updated title"
+            ),
+        )
+        self.assertEqual(replaced.status_code, 201, replaced.text)
+        self.assertEqual(replaced.json()["work_item"]["title"], "Updated title")
+
+    def test_create_work_item_closes_exists_check_race_without_overwrite(self) -> None:
+        # A stale "doesn't exist yet" read (another request winning the race) must
+        # not let this write silently clobber the file; the exclusive create still
+        # has to reject it.
+        project = self.register(self.first)
+        url = f"/api/projects/{project['id']}/work-items"
+        target = self.first / "WORK_ITEM.toml"
+        target.write_text("original", encoding="utf-8")
+        original_exists = Path.exists
+
+        def stale_exists(path: Path) -> bool:
+            if path == target:
+                return False
+            return original_exists(path)
+
+        with patch.object(Path, "exists", stale_exists):
+            response = self.client.post(url, json=self.minimal_work_item())
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(target.read_text(encoding="utf-8"), "original")
+
+    def test_create_work_item_rejects_escaping_and_unsafe_paths(self) -> None:
+        project = self.register(self.first)
+        url = f"/api/projects/{project['id']}/work-items"
+        for path in ("../escape.toml", "/etc/escape.toml"):
+            with self.subTest(path=path):
+                response = self.client.post(
+                    url, json=self.minimal_work_item(path=path)
+                )
+                self.assertEqual(response.status_code, 400, response.text)
+
+        (self.first / "linked.toml").symlink_to(self.root / "outside.toml")
+        response = self.client.post(
+            url, json=self.minimal_work_item(path="linked.toml")
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse((self.root / "outside.toml").exists())
+
+    def test_create_work_item_rejects_invalid_fields(self) -> None:
+        project = self.register(self.first)
+        url = f"/api/projects/{project['id']}/work-items"
+        self.assertEqual(
+            self.client.post(
+                url, json=self.minimal_work_item(definition_of_done=[])
+            ).status_code,
+            422,
+        )
+        blank = self.client.post(
+            url, json=self.minimal_work_item(acceptance_criteria=["   "])
+        )
+        self.assertEqual(blank.status_code, 400)
+        bad_id = self.client.post(url, json=self.minimal_work_item(id="bad id"))
+        self.assertEqual(bad_id.status_code, 400)
+
+    def test_create_work_item_requires_known_available_project(self) -> None:
+        missing = self.client.post(
+            "/api/projects/missing/work-items", json=self.minimal_work_item()
+        )
+        self.assertEqual(missing.status_code, 404)
+
+        project = self.register(self.first)
+        self.first.rename(self.root / "moved")
+        unavailable = self.client.post(
+            f"/api/projects/{project['id']}/work-items", json=self.minimal_work_item()
+        )
+        self.assertEqual(unavailable.status_code, 409)
