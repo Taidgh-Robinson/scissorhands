@@ -84,6 +84,17 @@ def report_verification(verification: VerificationResult) -> None:
 
 def report_iteration(record: IterationRecord, log: Path) -> None:
     decision = record.decision
+    if record.plan is not None:
+        step = record.plan.selected_step
+        print(f"\nObjective (agent claim): {step.id}: {step.objective} [{step.status}]")
+        print(f"Acceptance criteria: {', '.join(step.acceptance_criteria)}")
+        if record.plan_revised:
+            print(
+                f"Plan creation/revision reason: {record.plan.revision_reason or 'missing'}"
+            )
+        print(f"Handoff: {record.plan.handoff}")
+    if record.plan_required and record.planning_problem:
+        print(f"Plan problem: {record.planning_problem}.", file=sys.stderr)
     if record.agent_exit_code != 0:
         print(
             f"Agent command failed with exit code {record.agent_exit_code}. Log: {log}",

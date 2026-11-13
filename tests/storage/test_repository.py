@@ -164,6 +164,7 @@ class RunRepositoryTests(TestCase):
             "agent_output": "iteration-1.log",
             "final_message": "iteration-1.final.txt",
             "status": "status.json",
+            "plan": "plan.json",
             "progress": "progress.md",
             "prompt": "prompt.md",
             "patch": "changes.patch",

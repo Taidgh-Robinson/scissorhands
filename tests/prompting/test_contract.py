@@ -62,3 +62,33 @@ class ContractTests(TestCase):
         self.assertIn("## Custom\n\nRound 2/4. Say DONE.", prompt)
         self.assertNotIn("Scissorhands iteration contract", prompt)
         self.assertTrue(prompt.startswith("# Work item: Build the thing"))
+        self.assertIn("## Implementation plan and loop objective", prompt)
+
+    def test_plan_uses_the_active_path_iteration_and_real_criterion_ids(self) -> None:
+        prompt = compose_prompt(
+            WORK_ITEM,
+            2,
+            "DONE",
+            max_iterations=4,
+            plan_path=".scissorhands/WORK-ITEM/run-0001/loop-0002/plan.json",
+            planning_feedback="implementation plan is missing",
+        )
+        self.assertIn("loop-0002/plan.json", prompt)
+        self.assertIn('"iteration": 2', prompt)
+        self.assertIn('"AC-1"', prompt)
+        self.assertIn("select exactly ONE step", prompt)
+        self.assertIn("Before changing implementation code", prompt)
+        self.assertIn(
+            "Previous loop's planning feedback: implementation plan is missing", prompt
+        )
+        self.assertIn("revision_reason", prompt)
+        self.assertIn("A step may span", prompt)
+
+    def test_custom_contract_can_reference_the_plan_path(self) -> None:
+        contract = "Work from $plan_path. Say $marker."
+        validate_contract(contract, "custom")
+        prompt = compose_prompt(
+            WORK_ITEM, 1, "DONE", max_iterations=2, contract=contract
+        )
+        self.assertIn("Work from .scissorhands/plan.json. Say DONE.", prompt)
+        self.assertIn("## Implementation plan and loop objective", prompt)
