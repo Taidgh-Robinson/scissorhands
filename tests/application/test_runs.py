@@ -76,6 +76,26 @@ class RunServiceTests(TestCase):
                     encoding="utf-8",
                 )
                 log.write_text("<promise>COMPLETE</promise>\n", encoding="utf-8")
+                (log.parent / "plan.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "iteration": 1,
+                            "steps": [
+                                {
+                                    "id": "BUILD",
+                                    "objective": "Build the requested behavior.",
+                                    "acceptance_criteria": ["AC-1"],
+                                    "status": "completed",
+                                }
+                            ],
+                            "selected_step_id": "BUILD",
+                            "revision_reason": "Initial implementation plan.",
+                            "handoff": "No work remains.",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
                 return 0
 
             service = RunService(

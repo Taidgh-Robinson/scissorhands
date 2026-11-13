@@ -9,6 +9,7 @@ from scissorhands.storage.reports.formatting import (
     table_cell,
     verification_state,
 )
+from scissorhands.storage.reports.planning import objective_text, plan_section
 
 
 def write_run_report(
@@ -25,6 +26,7 @@ def write_run_report(
     if final.decision.rejection_reason:
         lines.append(f"Last rejection: {table_cell(final.decision.rejection_reason)}.")
     lines += _timeline_section(work_item, records)
+    lines += plan_section(final)
     lines += _criteria_history(work_item, records)
     lines += _verification_history(work_item, records)
     lines += [
@@ -41,8 +43,8 @@ def _timeline_section(work_item: WorkItem, records: list[IterationRecord]) -> li
         "",
         "## Timeline",
         "",
-        "| Loop | Outcome | Claimed met | Verification | Elapsed |",
-        "| --- | --- | --- | --- | --- |",
+        "| Loop | Selected objective (agent claim) | Outcome | Claimed met | Verification | Elapsed |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for record in records:
         claimed = (
@@ -58,6 +60,7 @@ def _timeline_section(work_item: WorkItem, records: list[IterationRecord]) -> li
         )
         lines.append(
             f"| [Loop {record.iteration:04d}](loop-{record.iteration:04d}/iteration-{record.iteration}.md) "
+            f"| {table_cell(objective_text(record))} "
             f"| {record.decision.outcome} | {claimed}/{len(work_item.checklist())} | {verification} "
             f"| {elapsed} |"
         )

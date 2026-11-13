@@ -10,6 +10,7 @@ from scissorhands.storage.reports.formatting import (
     table_cell,
     verification_state,
 )
+from scissorhands.storage.reports.planning import plan_section
 
 
 def write_loop_report(
@@ -31,6 +32,7 @@ def write_loop_report(
         lines.append(f"Elapsed: {record.elapsed_seconds:.2f} seconds.")
     if decision.rejection_reason:
         lines.append(f"Completion rejected: {table_cell(decision.rejection_reason)}.")
+    lines += plan_section(record)
     lines += _criteria_section(work_item, record, previous)
     lines += _verification_section(work_item, record, previous)
     lines += _progress_section(loop_dir, record)
@@ -104,4 +106,6 @@ def _progress_section(loop_dir: Path, record: IterationRecord) -> list[str]:
         lines[-1] += " [Status](status.json)."
     if (loop_dir / "changes.patch").exists():
         lines[-1] += " [Code changes](changes.patch)."
+    if (loop_dir / "plan.json").exists():
+        lines[-1] += " [Implementation plan](plan.json)."
     return lines

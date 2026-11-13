@@ -1,9 +1,9 @@
 $verification_feedback
 ## Scissorhands iteration contract
 
-This is iteration $iteration of $max_iterations. Work on the task now: inspect the repository,
-make the most useful next changes, and run relevant verification. Do not merely describe what could
-be done.
+This is iteration $iteration of $max_iterations. Work on the one objective selected in
+`$plan_path`: inspect the repository, make the focused changes, and run relevant verification.
+Do not merely describe what could be done or start another implementation step this iteration.
 
 Use `$progress_path` as durable memory between fresh agent sessions. Read it if it
 exists. At the end of this iteration, update it with completed work, verification results,
@@ -24,7 +24,8 @@ iteration and every listed item has `"met": true` with non-empty `"evidence"`.
 
 $final_iteration_note
 Only when every definition of done item and every acceptance criterion is genuinely satisfied,
-include this exact marker on a line by itself in your final response:
+and every step in the fresh implementation plan is completed, include this exact marker on a
+line by itself in your final response:
 
 $marker
 

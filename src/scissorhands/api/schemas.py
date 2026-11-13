@@ -19,6 +19,7 @@ LoopArtifactKind = Literal[
     "agent_output",
     "final_message",
     "status",
+    "plan",
     "progress",
     "prompt",
     "patch",

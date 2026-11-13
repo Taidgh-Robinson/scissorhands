@@ -29,6 +29,7 @@ _LOOP_ARTIFACTS = {
     "agent_output": "iteration-{number}.log",
     "final_message": "iteration-{number}.final.txt",
     "status": "status.json",
+    "plan": "plan.json",
     "progress": "progress.md",
     "prompt": "prompt.md",
     "patch": "changes.patch",

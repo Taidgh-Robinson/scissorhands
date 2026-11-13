@@ -32,6 +32,9 @@ Each iteration starts a new agent session. Each invocation gets the next numbere
 - `work-item.json` and `work-item.toml` preserve the work item; `run.json` records the agent,
   model, approval setting, iteration limit, start time, and starting Git commit.
 - `loop-0001/progress.md` is the agent's durable handoff note. The next loop gets a copy.
+- `loop-0001/plan.json` is the agent's implementation plan and selected objective. Each step
+  has a stable ID, intended outcome, acceptance-criterion links, and claimed status. The next
+  loop gets a copy; the agent selects one objective and updates the plan for that iteration.
 - `loop-0001/status.json` is the agent's met/unmet assessment of each checklist item, with evidence.
   The harness prints it as a checklist after every iteration. A completion marker is accepted only
   when the file was updated during that iteration and every definition-of-done and acceptance-
@@ -44,8 +47,9 @@ Each iteration starts a new agent session. Each invocation gets the next numbere
   the end of the run.
 - Codex also writes its final response to `iteration-1.final.txt`.
 - `loop-0001/iteration-1.json` is the harness-owned receipt for that iteration. It
-  preserves the progress text and criteria snapshot, whether each was updated, verification
-  results, the completion decision, timing, before/after Git tree IDs, and the iteration outcome.
+  preserves the progress text, criteria and implementation-plan snapshots, whether each was
+  updated, verification results, the completion decision, timing, before/after Git tree IDs,
+  and the iteration outcome.
   Verification command output is saved separately as `verification-N.log`.
 - `loop-0001/iteration-1.md` and the run's `report.md` summarize the outcome. The run's
   `report.json` is created at startup and updated after each completed loop, so an interrupted
@@ -53,9 +57,10 @@ Each iteration starts a new agent session. Each invocation gets the next numbere
 
 New runs start with clean agent state. An interrupted run retains its folder and number.
 
-The loop stops when the agent puts `<promise>COMPLETE</promise>` on a line by itself and submits a
-fresh, fully-met criteria status, when an agent command fails, or when the iteration limit is
-reached. Reaching the limit returns exit code 2; an agent failure returns 1.
+The loop stops when the agent puts `<promise>COMPLETE</promise>` on a line by itself and submits
+fresh, fully-met criteria status and a valid implementation plan with every step completed,
+when an agent command fails, or when the iteration limit is reached. Reaching the limit returns
+exit code 2; an agent failure returns 1.
 
 If the work item lists `verification` commands, the harness runs them itself after every iteration
 instead of trusting the agent's report. The completion marker is only accepted when every command
@@ -117,6 +122,58 @@ change. Keep each criterion independently verifiable, and do not include the com
 The prompt labels them `DoD-1`, `DoD-2`, … and `AC-1`, `AC-2`, … in file order, and the agent
 reports status against those IDs.
 
+## One objective per loop
+
+On the first iteration, the agent inspects the project and breaks the work item into small,
+verifiable implementation steps. Before changing implementation code, it writes the current
+loop's `plan.json` and selects exactly one step. Related implementation, tests, and documentation
+belong to that objective. An unfinished step may be selected again in the next fresh session.
+Verification failures take priority: select or add a repair step before unrelated work.
+
+For example, a two-criterion export work item might start with:
+
+```json
+{
+  "schema_version": 1,
+  "iteration": 1,
+  "steps": [
+    {
+      "id": "STREAM",
+      "objective": "Stream exported JSON records without buffering the input.",
+      "acceptance_criteria": ["AC-1"],
+      "status": "in_progress"
+    },
+    {
+      "id": "CLI",
+      "objective": "Expose streaming export through the CLI.",
+      "acceptance_criteria": ["AC-2"],
+      "status": "pending"
+    }
+  ],
+  "selected_step_id": "STREAM",
+  "revision_reason": "Initial implementation plan.",
+  "handoff": "Starting the streaming implementation."
+}
+```
+
+Before exiting, the agent updates the selected step's status and writes a concrete `handoff`
+describing the result, any blocker, and the next step. Status is `pending`, `in_progress`,
+`completed`, or `blocked`; only the selected step may be `in_progress`, and it cannot remain
+`pending`. Every step links to one or more known AC IDs, and the plan must cover all acceptance
+criteria. Keep IDs stable for the same steps and retain completed steps. Creating a plan or
+changing its ordered step definitions requires a non-empty `revision_reason`; changing only
+statuses, selection, or handoff does not.
+
+The harness captures the plan before running verification and includes the selected objective,
+revision reason, and handoff in the terminal and Markdown reports. Receipts preserve the complete
+snapshot, and `report.json` includes each loop's objective. Missing, invalid, stale, and unfinished
+plans cannot support completion. Validation feedback is included in the next prompt. Each new
+run starts with a new plan; prior loop snapshots remain available for review.
+
+Plans and step completion remain agent claims. The harness validates the final recorded plan
+and its freshness; it does not establish that the objective was written before code edits or
+that all changes stayed within it. Criteria checks and harness-run verification still apply.
+
 ## Customizing the iteration contract
 
 The harness appends an iteration contract to every prompt. The default lives in
@@ -135,10 +192,14 @@ The template uses Python `string.Template` placeholders:
 - `$verification_feedback`: failing verification output from the previous iteration, empty
   otherwise.
 - `$progress_path` and `$status_path`: paths to the current loop's agent-written state.
+- `$plan_path`: path to the current loop's implementation plan.
 
 Unknown placeholders are rejected at startup. Write a literal `$` as `$$`.
 Custom contracts with hard-coded `.scissorhands/progress.md` or `.scissorhands/status.json` paths
 should replace them with `$progress_path` and `$status_path`.
+Implementation-plan instructions are always included, including with a custom iteration contract.
+Custom contracts should keep their guidance consistent with selecting one objective and updating
+the plan before claiming completion. Older receipts without planning fields remain readable.
 
 Start with two or three iterations and inspect the run report, loop progress notes, and the Git diff.
 Small limits make it much easier to learn how prompt wording affects convergence.
@@ -255,7 +316,7 @@ including the distinction between agent claims and harness verification decision
 
 Run artifact kinds are `manifest`, `settings`, `work_item`, `work_item_toml`, `report`,
 and `patch`. Supplying `loop=N` selects loop kinds: `receipt`, `report`, `agent_output`,
-`final_message`, `status`, `progress`, `prompt`, `patch`, and `verification_output`.
+`final_message`, `status`, `plan`, `progress`, `prompt`, `patch`, and `verification_output`.
 The latter also requires `verification=N`. Callers cannot supply arbitrary filenames;
 file symlinks must resolve inside the selected run.
 

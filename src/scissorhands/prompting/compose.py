@@ -2,6 +2,7 @@
 
 from scissorhands.core.work_items import WorkItem
 from scissorhands.prompting.contract import default_contract, render_contract
+from scissorhands.prompting.planning import render_planning
 from scissorhands.prompting.work_items import render_work_item
 
 
@@ -15,6 +16,8 @@ def compose_prompt(
     contract: str | None = None,
     progress_path: str = ".scissorhands/progress.md",
     status_path: str = ".scissorhands/status.json",
+    plan_path: str = ".scissorhands/plan.json",
+    planning_feedback: str | None = None,
 ) -> str:
     """Add the repeatable loop contract to the user's task."""
     final_note = ""
@@ -43,5 +46,7 @@ failures before starting anything else:
         verification_feedback=feedback,
         progress_path=progress_path,
         status_path=status_path,
+        plan_path=plan_path,
     )
-    return f"{render_work_item(work_item)}\n{rendered}"
+    planning = render_planning(work_item, iteration, plan_path, planning_feedback)
+    return f"{render_work_item(work_item)}\n\n{planning}\n{rendered}"

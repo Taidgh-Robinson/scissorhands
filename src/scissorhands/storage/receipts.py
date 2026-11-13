@@ -32,6 +32,11 @@ def receipt_data(record: IterationRecord) -> dict[str, object]:
         "verification": _verification_data(record),
         "completion_marker_claimed": record.marker_claimed,
         "completion_accepted": decision.accepted,
+        "plan_required": record.plan_required,
+        "plan_updated": record.plan_updated,
+        "plan_error": record.plan_error,
+        "plan_revised": record.plan_revised,
+        "plan": asdict(record.plan) if record.plan is not None else None,
     }
 
 

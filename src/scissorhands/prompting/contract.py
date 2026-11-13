@@ -16,6 +16,7 @@ PLACEHOLDERS = frozenset(
         "verification_feedback",
         "progress_path",
         "status_path",
+        "plan_path",
     }
 )
 
