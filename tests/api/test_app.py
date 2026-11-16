@@ -208,6 +208,14 @@ class ReportingApiTests(TestCase):
             self.first / ".scissorhands/TASK/run-0001/loop-0001/verification-1.log"
         )
         verification.write_text("verification passed", encoding="utf-8")
+        plan = {"selected_step_id": "STREAM", "handoff": "Next connect the CLI."}
+        verification.with_name("plan.json").write_text(
+            json.dumps(plan), encoding="utf-8"
+        )
+        response = self.client.get(prefix + "/loops/1/artifacts/plan")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["state"], "available")
+        self.assertEqual(response.json()["data"], plan)
         url = prefix + "/loops/1/artifacts/verification_output"
         self.assertEqual(self.client.get(url).status_code, 400)
         self.assertEqual(
@@ -257,6 +265,13 @@ class ReportingApiTests(TestCase):
         )
         self.assertIn("manifest", kind["schema"]["enum"])
         self.assertNotIn("agent_output", kind["schema"]["enum"])
+        loop_route = schema["paths"][prefix + "/loops/{number}/artifacts/{kind}"]["get"]
+        loop_kind = next(
+            parameter
+            for parameter in loop_route["parameters"]
+            if parameter["name"] == "kind"
+        )
+        self.assertIn("plan", loop_kind["schema"]["enum"])
         for code in ("400", "404", "409", "422"):
             self.assertIn(code, route["responses"])
         models = schema["components"]["schemas"]
@@ -346,9 +361,7 @@ class ReportingApiTests(TestCase):
         url = f"/api/projects/{project['id']}/work-items"
         for path in ("../escape.toml", "/etc/escape.toml"):
             with self.subTest(path=path):
-                response = self.client.post(
-                    url, json=self.minimal_work_item(path=path)
-                )
+                response = self.client.post(url, json=self.minimal_work_item(path=path))
                 self.assertEqual(response.status_code, 400, response.text)
 
         (self.first / "linked.toml").symlink_to(self.root / "outside.toml")

@@ -11,11 +11,13 @@ from pathlib import Path
 
 from scissorhands.core.iteration import IterationRecord
 from scissorhands.core.loop.models import LoopConfig
+from scissorhands.core.planning import PLAN_FILE
 from scissorhands.core.status import STATUS_FILE
 from scissorhands.core.verification import VerificationResult
 from scissorhands.core.work_items import validate_work_item_id
 from scissorhands.storage.diffs import head_commit, snapshot_worktree, write_loop_diff
 from scissorhands.storage.paths import RunPaths
+from scissorhands.storage.planning import copy_plan
 from scissorhands.storage.receipts import write_iteration_receipt
 from scissorhands.storage.reports import (
     write_loop_report,
@@ -199,4 +201,5 @@ def initialize_loop(paths: RunPaths, number: int) -> tuple[Path, Path, Path]:
         shutil.copyfile(previous / "progress.md", progress)
         if (previous / STATUS_FILE).is_file():
             shutil.copyfile(previous / STATUS_FILE, status)
+        copy_plan(previous / PLAN_FILE, loop_dir / PLAN_FILE)
     return loop_dir, status, progress

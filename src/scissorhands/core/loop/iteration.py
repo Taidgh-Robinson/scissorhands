@@ -19,14 +19,17 @@ from scissorhands.core.loop.models import (
     Verify,
 )
 from scissorhands.core.loop.observer import RunObserver
+from scissorhands.core.planning import PLAN_FILE, ImplementationPlan
 from scissorhands.core.status import STATUS_FILE
 from scissorhands.core.verification import VerificationResult
 from scissorhands.prompting.compose import compose_prompt
 from scissorhands.storage.agent_state import (
+    modified_ns,
     read_agent_state,
     read_modification_times,
     read_progress,
 )
+from scissorhands.storage.planning import read_plan
 from scissorhands.storage.runs import write_verification_logs
 
 _ANSI_ESCAPE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -47,7 +50,11 @@ async def call_backend(callback: Callable, *args):
 
 
 def build_iteration(
-    config: LoopConfig, loop_dir: Path, number: int, feedback: str | None
+    config: LoopConfig,
+    loop_dir: Path,
+    number: int,
+    feedback: str | None,
+    planning_feedback: str | None = None,
 ) -> PreparedIteration:
     """Build a prompt and command without writing files, also used for previews."""
     progress_path = str((loop_dir / "progress.md").relative_to(config.root))
@@ -61,6 +68,8 @@ def build_iteration(
         contract=config.contract,
         progress_path=progress_path,
         status_path=status_path,
+        plan_path=str((loop_dir / PLAN_FILE).relative_to(config.root)),
+        planning_feedback=planning_feedback,
     )
     final_message = loop_dir / f"iteration-{number}.final.txt"
     command = config.adapter.command(
@@ -77,10 +86,14 @@ def build_iteration(
 
 
 def prepare_iteration(
-    config: LoopConfig, loop_dir: Path, number: int, feedback: str | None
+    config: LoopConfig,
+    loop_dir: Path,
+    number: int,
+    feedback: str | None,
+    planning_feedback: str | None = None,
 ) -> PreparedIteration:
     """Build the agent invocation and persist its prompt for this loop."""
-    prepared = build_iteration(config, loop_dir, number, feedback)
+    prepared = build_iteration(config, loop_dir, number, feedback, planning_feedback)
     (loop_dir / "prompt.md").write_text(prepared.prompt, encoding="utf-8")
     return prepared
 
@@ -94,6 +107,7 @@ async def execute_iteration(
     invoke: Invoke,
     verify: Verify,
     observer: RunObserver,
+    previous_plan: ImplementationPlan | None = None,
 ) -> IterationRecord:
     """Invoke the agent, inspect its claims, and run independent verification."""
     observer.on_iteration_started(
@@ -102,6 +116,8 @@ async def execute_iteration(
     status_before, progress_before = await asyncio.to_thread(
         read_modification_times, status, progress
     )
+    plan_path = prepared.log.parent / PLAN_FILE
+    plan_before = await asyncio.to_thread(modified_ns, plan_path)
     started_at = datetime.now(UTC).isoformat()
     started = perf_counter()
     stdin_prompt = prepared.prompt if config.adapter.uses_stdin else None
@@ -114,6 +130,10 @@ async def execute_iteration(
     )
     status_updated = state.status_modified_ns != status_before
     progress_updated = state.progress_modified_ns != progress_before
+    plan, plan_error, plan_revised = await asyncio.to_thread(
+        read_plan, plan_path, config.work_item, previous_plan
+    )
+    plan_updated = await asyncio.to_thread(modified_ns, plan_path) != plan_before
 
     claimed = False
     verification = None
@@ -144,6 +164,11 @@ async def execute_iteration(
         finished_at=datetime.now(UTC).isoformat(),
         agent_elapsed_seconds=agent_elapsed_seconds,
         verification_elapsed_seconds=verification_elapsed_seconds,
+        plan=plan,
+        plan_updated=plan_updated,
+        plan_error=plan_error,
+        plan_revised=plan_revised,
+        plan_required=True,
     )
 
 

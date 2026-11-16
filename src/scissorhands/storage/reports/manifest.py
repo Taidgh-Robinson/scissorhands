@@ -65,4 +65,19 @@ def _timeline_entry(record: IterationRecord) -> dict[str, object]:
         "git_after_tree": record.git_after_tree,
         "receipt": f"loop-{record.iteration:04d}/iteration-{record.iteration}.json",
         "report": f"loop-{record.iteration:04d}/iteration-{record.iteration}.md",
+        "objective": (
+            {
+                "step_id": record.plan.selected_step.id,
+                "intended_outcome": record.plan.selected_step.objective,
+                "acceptance_criteria": list(
+                    record.plan.selected_step.acceptance_criteria
+                ),
+                "claimed_status": record.plan.selected_step.status,
+            }
+            if record.plan is not None
+            else None
+        ),
+        "plan_updated": record.plan_updated,
+        "plan_problem": record.planning_problem if record.plan_required else None,
+        "plan_revised": record.plan_revised,
     }

@@ -11,6 +11,7 @@ from scissorhands.core.loop.models import Invoke, LoopConfig, LoopResult, Verify
 from scissorhands.core.loop.observer import RunObserver
 from scissorhands.core.loop.processes import run_command
 from scissorhands.core.loop.verification import run_verification
+from scissorhands.core.planning import ImplementationPlan
 from scissorhands.storage.paths import RunPaths
 from scissorhands.storage.runs import RunWriter, initialize_run
 
@@ -35,12 +36,22 @@ async def run_loop(
     writer = RunWriter(config, paths, on_warning=observer.on_warning)
     records: list[IterationRecord] = []
     feedback: str | None = None
+    planning_feedback: str | None = None
+    previous_plan: ImplementationPlan | None = None
     try:
         if reserved:
             await asyncio.to_thread(writer.update_manifest, records)
         for number in range(1, config.max_iterations + 1):
             record = await _run_iteration(
-                config, writer, number, feedback, invoke, verify, observer
+                config,
+                writer,
+                number,
+                feedback,
+                invoke,
+                verify,
+                observer,
+                planning_feedback,
+                previous_plan,
             )
             await asyncio.to_thread(writer.save_iteration, record, records)
             records.append(record)
@@ -50,6 +61,9 @@ async def run_loop(
             if record.decision.accepted or record.decision.outcome == "agent_failed":
                 break
             feedback = record.verification_feedback
+            planning_feedback = record.planning_feedback
+            if record.plan is not None and record.planning_problem is None:
+                previous_plan = record.plan
         await asyncio.to_thread(writer.finish, records)
     except asyncio.CancelledError:
         await asyncio.to_thread(writer.mark_cancelled, records)
@@ -71,10 +85,12 @@ async def _run_iteration(
     invoke: Invoke,
     verify: Verify,
     observer: RunObserver,
+    planning_feedback: str | None,
+    previous_plan: ImplementationPlan | None,
 ) -> IterationRecord:
     loop_dir, status, progress = await asyncio.to_thread(writer.initialize_loop, number)
     prepared = await asyncio.to_thread(
-        prepare_iteration, config, loop_dir, number, feedback
+        prepare_iteration, config, loop_dir, number, feedback, planning_feedback
     )
     before = await asyncio.to_thread(writer.capture_before, number)
     record = await execute_iteration(
@@ -85,5 +101,6 @@ async def _run_iteration(
         invoke=invoke,
         verify=verify,
         observer=observer,
+        previous_plan=previous_plan,
     )
     return await asyncio.to_thread(writer.capture_changes, record, before)

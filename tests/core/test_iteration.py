@@ -112,6 +112,11 @@ class ReceiptFormatTests(TestCase):
                 },
                 "completion_marker_claimed": True,
                 "completion_accepted": False,
+                "plan_required": False,
+                "plan_updated": False,
+                "plan_error": None,
+                "plan_revised": False,
+                "plan": None,
             },
         )
 

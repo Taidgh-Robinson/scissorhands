@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from scissorhands.core.planning import ImplementationPlan
 from scissorhands.core.status import CriterionStatus
 from scissorhands.core.verification import VerificationResult
 
@@ -12,6 +13,7 @@ Outcome = Literal[
     "agent_failed",
     "verification_failed",
     "criteria_rejected",
+    "plan_rejected",
     "completed",
     "iteration_limit",
     "continuing",
@@ -48,6 +50,11 @@ class IterationRecord:
     verification_elapsed_seconds: float | None = None
     git_before_tree: str | None = None
     git_after_tree: str | None = None
+    plan: ImplementationPlan | None = None
+    plan_updated: bool = False
+    plan_error: str | None = None
+    plan_revised: bool = False
+    plan_required: bool = False
 
     @property
     def decision(self) -> CompletionDecision:
@@ -58,6 +65,38 @@ class IterationRecord:
         if self.verification is not None and not self.verification.passed:
             return self.verification.feedback()
         return None
+
+    @property
+    def planning_problem(self) -> str | None:
+        """Explain missing, stale, or invalid plans independently of completion."""
+        if self.plan_error:
+            return self.plan_error
+        if not self.plan_updated:
+            return "implementation plan was not updated this iteration"
+        if self.plan is None:
+            return "implementation plan was not readable"
+        if self.plan.iteration != self.iteration:
+            return f"implementation plan must describe iteration {self.iteration}"
+        return None
+
+    @property
+    def planning_feedback(self) -> str | None:
+        if self.plan_required:
+            if problem := self.planning_problem:
+                return problem
+            if self.marker_claimed:
+                return unfinished_plan_problem(self)
+        return None
+
+
+def unfinished_plan_problem(record: IterationRecord) -> str | None:
+    if record.plan is not None:
+        unfinished = [
+            step.id for step in record.plan.steps if step.status != "completed"
+        ]
+        if unfinished:
+            return f"implementation plan has unfinished steps: {', '.join(unfinished)}"
+    return None
 
 
 def criteria_status_problem(record: IterationRecord) -> str | None:
@@ -85,6 +124,10 @@ def evaluate_completion(record: IterationRecord) -> CompletionDecision:
         problem = criteria_status_problem(record)
         if problem is not None:
             return CompletionDecision("criteria_rejected", problem)
+        if record.plan_required:
+            problem = record.planning_problem or unfinished_plan_problem(record)
+            if problem is not None:
+                return CompletionDecision("plan_rejected", problem)
         return CompletionDecision("completed")
     return CompletionDecision(
         "iteration_limit" if record.final_iteration else "continuing"

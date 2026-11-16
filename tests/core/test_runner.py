@@ -56,6 +56,27 @@ def write_fully_met_status(root: Path, evidence: str = "Checked.") -> None:
     )
 
 
+def write_plan(loop_dir: Path, **overrides: object) -> dict:
+    data = {
+        "schema_version": 1,
+        "iteration": int(loop_dir.name.removeprefix("loop-")),
+        "steps": [
+            {
+                "id": "BUILD",
+                "objective": "Build the requested behavior.",
+                "acceptance_criteria": ["AC-1"],
+                "status": "completed",
+            }
+        ],
+        "selected_step_id": "BUILD",
+        "revision_reason": "Initial implementation plan.",
+        "handoff": "No work remains.",
+        **overrides,
+    }
+    (loop_dir / "plan.json").write_text(json.dumps(data), encoding="utf-8")
+    return data
+
+
 class CompletionMarkerTests(TestCase):
     def test_marker_must_occupy_a_line(self) -> None:
         self.assertTrue(has_completion_marker("Done\n<promise>COMPLETE</promise>\n"))
@@ -302,6 +323,7 @@ class LoopTests(TestCase):
                 command: list[str], prompt: str | None, log: Path, cwd: Path
             ) -> int:
                 self.assertFalse(active_status(root).exists())
+                self.assertFalse((log.parent / "plan.json").exists())
                 self.assertIn(
                     "No iterations completed yet",
                     (log.parent / "progress.md").read_text(),
@@ -330,6 +352,7 @@ class LoopTests(TestCase):
                     "still working\n" if calls == 1 else "<promise>COMPLETE</promise>\n"
                 )
                 write_fully_met_status(root, evidence=f"Checked in iteration {calls}.")
+                write_plan(log.parent)
                 log.write_text(output, encoding="utf-8")
                 return 0
 
@@ -410,6 +433,7 @@ class LoopTests(TestCase):
                 command: list[str], prompt: str | None, log: Path, cwd: Path
             ) -> int:
                 write_fully_met_status(root)
+                write_plan(log.parent)
                 log.write_text("<promise>COMPLETE</promise>\n", encoding="utf-8")
                 return 0
 
@@ -446,6 +470,7 @@ class LoopTests(TestCase):
                 write_fully_met_status(
                     root, evidence=f"Checked before verification {len(prompts)}."
                 )
+                write_plan(log.parent)
                 log.write_text("<promise>COMPLETE</promise>\n", encoding="utf-8")
                 return 0
 
@@ -705,6 +730,314 @@ class LoopTests(TestCase):
 
             self.assertIn("(not updated this iteration)", output.getvalue())
             self.assertIn("[?] DoD-1: Tests pass.", output.getvalue())
+
+
+class PlanLoopTests(TestCase):
+    def test_an_unfinished_objective_can_continue_in_the_next_loop(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = 0
+
+            def invoke(command, prompt, log, cwd):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    prior = json.loads((log.parent / "plan.json").read_text())
+                    self.assertEqual(prior["steps"][0]["status"], "in_progress")
+                    self.assertEqual(prior["handoff"], "Finish the boundary cases.")
+                write_plan(
+                    log.parent,
+                    steps=[
+                        {
+                            "id": "BUILD",
+                            "objective": "Build the requested behavior.",
+                            "acceptance_criteria": ["AC-1"],
+                            "status": "in_progress" if calls == 1 else "completed",
+                        }
+                    ],
+                    handoff="Finish the boundary cases."
+                    if calls == 1
+                    else "No work remains.",
+                    revision_reason="Initial implementation plan."
+                    if calls == 1
+                    else "",
+                )
+                write_fully_met_status(root)
+                log.write_text("working" if calls == 1 else MARKER)
+                return 0
+
+            with redirect_stdout(StringIO()):
+                result = run_loop(
+                    LoopConfig(root, WORK_ITEM, OpenCodeAdapter(), "opencode", 2),
+                    invoke=invoke,
+                )
+            self.assertTrue(result.completed)
+            last = json.loads(
+                (result.run_dir / "loop-0002/iteration-2.json").read_text()
+            )
+            self.assertFalse(last["plan_revised"])
+            self.assertEqual(last["plan"]["selected_step_id"], "BUILD")
+
+    def test_plan_is_carried_forward_and_each_objective_is_reported(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshots = []
+
+            def invoke(command, prompt, log, cwd):
+                number = len(snapshots) + 1
+                self.assertIn(
+                    str(log.parent.relative_to(root) / "plan.json"), command[-1]
+                )
+                if number == 1:
+                    data = write_plan(
+                        log.parent,
+                        steps=[
+                            {
+                                "id": "BUILD",
+                                "objective": "Build the core behavior.",
+                                "acceptance_criteria": ["AC-1"],
+                                "status": "completed",
+                            },
+                            {
+                                "id": "CLI",
+                                "objective": "Connect the CLI.",
+                                "acceptance_criteria": ["AC-1"],
+                                "status": "pending",
+                            },
+                        ],
+                        handoff="Next connect the CLI.",
+                    )
+                else:
+                    self.assertEqual(
+                        json.loads((log.parent / "plan.json").read_text()), snapshots[0]
+                    )
+                    self.assertIn(
+                        "Build the core behavior.",
+                        (log.parent / "plan.json").read_text(),
+                    )
+                    data = json.loads((log.parent / "plan.json").read_text())
+                    data["steps"][1]["status"] = "completed"
+                    data.update(
+                        iteration=2,
+                        selected_step_id="CLI",
+                        revision_reason="",
+                        handoff="No work remains.",
+                    )
+                    write_plan(log.parent, **data)
+                snapshots.append(data)
+                write_fully_met_status(root)
+                log.write_text("working" if number == 1 else MARKER)
+                return 0
+
+            output = StringIO()
+            with redirect_stdout(output):
+                result = run_loop(
+                    LoopConfig(root, WORK_ITEM, OpenCodeAdapter(), "opencode", 3),
+                    invoke=invoke,
+                )
+            self.assertTrue(result.completed)
+            self.assertEqual(result.iterations, 2)
+            first = result.run_dir / "loop-0001"
+            second = result.run_dir / "loop-0002"
+            self.assertEqual(
+                json.loads((first / "plan.json").read_text()), snapshots[0]
+            )
+            receipt = json.loads((second / "iteration-2.json").read_text())
+            self.assertEqual(receipt["plan"]["selected_step_id"], "CLI")
+            self.assertTrue(receipt["plan_updated"])
+            self.assertFalse(receipt["plan_revised"])
+            self.assertIsNone(receipt["plan_error"])
+            self.assertIn("CLI: Connect the CLI.", output.getvalue())
+            self.assertIn(
+                "Next connect the CLI.", (first / "iteration-1.md").read_text()
+            )
+            self.assertIn(
+                "[Implementation plan](plan.json)",
+                (second / "iteration-2.md").read_text(),
+            )
+            report = (result.run_dir / "report.md").read_text()
+            self.assertIn("BUILD: Build the core behavior.", report)
+            self.assertIn("CLI: Connect the CLI.", report)
+            timeline = json.loads((result.run_dir / "report.json").read_text())["loops"]
+            self.assertEqual(
+                [entry["objective"]["step_id"] for entry in timeline], ["BUILD", "CLI"]
+            )
+            self.assertEqual(timeline[1]["objective"]["acceptance_criteria"], ["AC-1"])
+
+    def test_missing_invalid_and_unfinished_plans_reject_completion(self) -> None:
+        for label in (
+            "missing",
+            "malformed",
+            "unfinished",
+            "wrong iteration",
+            "blank handoff",
+        ):
+            with self.subTest(label=label), TemporaryDirectory() as directory:
+                root = Path(directory)
+                prompts = []
+
+                def invoke(
+                    command,
+                    prompt,
+                    log,
+                    cwd,
+                    *,
+                    case=label,
+                    state_root=root,
+                    seen_prompts=prompts,
+                ):
+                    seen_prompts.append(command[-1])
+                    write_fully_met_status(state_root)
+                    if case == "malformed":
+                        (log.parent / "plan.json").write_text("not JSON")
+                    elif case == "unfinished":
+                        write_plan(
+                            log.parent,
+                            steps=[
+                                {
+                                    "id": "BUILD",
+                                    "objective": "Build the behavior.",
+                                    "acceptance_criteria": ["AC-1"],
+                                    "status": "blocked",
+                                }
+                            ],
+                        )
+                    elif case == "wrong iteration":
+                        write_plan(log.parent, iteration=99)
+                    elif case == "blank handoff":
+                        write_plan(log.parent, handoff="  ")
+                    log.write_text(MARKER)
+                    return 0
+
+                with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                    result = run_loop(
+                        LoopConfig(root, WORK_ITEM, OpenCodeAdapter(), "opencode", 2),
+                        invoke=invoke,
+                    )
+                self.assertFalse(result.completed)
+                receipt = json.loads(
+                    (result.run_dir / "loop-0001/iteration-1.json").read_text()
+                )
+                self.assertEqual(receipt["outcome"], "plan_rejected")
+                self.assertFalse(receipt["completion_accepted"])
+                self.assertIn(receipt["rejection_reason"], prompts[1])
+
+    def test_copied_plan_is_stale_until_updated_for_this_iteration(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = 0
+
+            def invoke(command, prompt, log, cwd):
+                nonlocal calls
+                calls += 1
+                write_fully_met_status(root)
+                if calls == 1:
+                    write_plan(log.parent)
+                elif calls == 3:
+                    self.assertIn("implementation plan was not updated", command[-1])
+                    write_plan(log.parent, revision_reason="")
+                log.write_text("working" if calls == 1 else MARKER)
+                return 0
+
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                result = run_loop(
+                    LoopConfig(root, WORK_ITEM, OpenCodeAdapter(), "opencode", 3),
+                    invoke=invoke,
+                )
+            self.assertTrue(result.completed)
+            self.assertEqual(result.iterations, 3)
+            stale = json.loads(
+                (result.run_dir / "loop-0002/iteration-2.json").read_text()
+            )
+            self.assertFalse(stale["plan_updated"])
+            self.assertEqual(stale["plan"]["iteration"], 1)
+            self.assertEqual(stale["outcome"], "plan_rejected")
+
+    def test_plan_revisions_need_reasons_and_use_the_last_valid_snapshot(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = 0
+
+            def invoke(command, prompt, log, cwd):
+                nonlocal calls
+                calls += 1
+                write_fully_met_status(root)
+                if calls == 1:
+                    write_plan(log.parent)
+                else:
+                    reason = (
+                        ""
+                        if calls == 2
+                        else "Inspection found the CLI integration was missing."
+                    )
+                    write_plan(
+                        log.parent,
+                        steps=[
+                            {
+                                "id": "CLI",
+                                "objective": "Connect the CLI.",
+                                "acceptance_criteria": ["AC-1"],
+                                "status": "completed",
+                            }
+                        ],
+                        selected_step_id="CLI",
+                        revision_reason=reason,
+                    )
+                    if calls == 3:
+                        self.assertIn("revision_reason is required", command[-1])
+                log.write_text("working" if calls == 1 else MARKER)
+                return 0
+
+            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                result = run_loop(
+                    LoopConfig(root, WORK_ITEM, OpenCodeAdapter(), "opencode", 3),
+                    invoke=invoke,
+                )
+            self.assertTrue(result.completed)
+            receipt = json.loads(
+                (result.run_dir / "loop-0002/iteration-2.json").read_text()
+            )
+            self.assertEqual(receipt["outcome"], "plan_rejected")
+            last = json.loads(
+                (result.run_dir / "loop-0003/iteration-3.json").read_text()
+            )
+            self.assertTrue(last["plan_revised"])
+            self.assertIn(
+                "CLI integration was missing", last["plan"]["revision_reason"]
+            )
+            self.assertIn(
+                "CLI integration was missing",
+                (result.run_dir / "loop-0003/iteration-3.md").read_text(),
+            )
+
+    def test_plan_snapshot_is_taken_before_verification(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            loop_dir = None
+
+            def invoke(command, prompt, log, cwd):
+                nonlocal loop_dir
+                loop_dir = log.parent
+                write_fully_met_status(root)
+                write_plan(log.parent)
+                log.write_text(MARKER)
+                return 0
+
+            def verify(commands, cwd):
+                (loop_dir / "plan.json").write_text("invalid after verification")
+                return VerificationResult((CommandResult("make test", 0, "passed"),))
+
+            with redirect_stdout(StringIO()):
+                result = run_loop(
+                    LoopConfig(
+                        root, VERIFIED_WORK_ITEM, OpenCodeAdapter(), "opencode", 1
+                    ),
+                    invoke=invoke,
+                    verify=verify,
+                )
+            self.assertTrue(result.completed)
+            receipt = json.loads((loop_dir / "iteration-1.json").read_text())
+            self.assertEqual(receipt["plan"]["selected_step_id"], "BUILD")
 
 
 class ComposePromptTests(TestCase):
