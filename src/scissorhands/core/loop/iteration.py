@@ -21,8 +21,8 @@ from scissorhands.core.loop.models import (
 from scissorhands.core.loop.observer import RunObserver
 from scissorhands.core.planning import PLAN_FILE, ImplementationPlan
 from scissorhands.core.status import STATUS_FILE
-from scissorhands.core.verification import VerificationResult
 from scissorhands.prompting.compose import compose_prompt
+from scissorhands.storage.activity import LoopActivity
 from scissorhands.storage.agent_state import (
     modified_ns,
     read_agent_state,
@@ -107,6 +107,7 @@ async def execute_iteration(
     invoke: Invoke,
     verify: Verify,
     observer: RunObserver,
+    activity: LoopActivity,
     previous_plan: ImplementationPlan | None = None,
 ) -> IterationRecord:
     """Invoke the agent, inspect its claims, and run independent verification."""
@@ -118,6 +119,7 @@ async def execute_iteration(
     )
     plan_path = prepared.log.parent / PLAN_FILE
     plan_before = await asyncio.to_thread(modified_ns, plan_path)
+    await activity.set_phase("agent")
     started_at = datetime.now(UTC).isoformat()
     started = perf_counter()
     stdin_prompt = prepared.prompt if config.adapter.uses_stdin else None
@@ -125,6 +127,7 @@ async def execute_iteration(
         invoke, prepared.command, stdin_prompt, prepared.log, config.root
     )
     agent_elapsed_seconds = perf_counter() - started
+    await activity.set_phase("assessing")
     state = await asyncio.to_thread(
         read_agent_state, status, progress, config.work_item.checklist()
     )
@@ -142,10 +145,19 @@ async def execute_iteration(
         observer.on_status(status, state.statuses, updated=status_updated)
         claimed = await _read_completion_claim(config, prepared)
         if config.work_item.verification:
-            verification, verification_elapsed_seconds = await _verify_iteration(
-                config, prepared, verify
+            await activity.set_phase("verifying")
+            verification_started = perf_counter()
+            verification = await call_backend(
+                verify, config.work_item.verification, config.root
             )
-            observer.on_verification(verification)
+            verification_elapsed_seconds = perf_counter() - verification_started
+
+    await activity.set_phase("finalizing")
+    if verification is not None:
+        await asyncio.to_thread(
+            write_verification_logs, prepared.log.parent, verification
+        )
+        observer.on_verification(verification)
 
     return IterationRecord(
         iteration=prepared.number,
@@ -181,15 +193,3 @@ async def _read_completion_claim(
         final_message=prepared.final_message,
     )
     return has_completion_marker(output, config.completion_marker)
-
-
-async def _verify_iteration(
-    config: LoopConfig,
-    prepared: PreparedIteration,
-    verify: Verify,
-) -> tuple[VerificationResult, float]:
-    started = perf_counter()
-    result = await call_backend(verify, config.work_item.verification, config.root)
-    elapsed = perf_counter() - started
-    await asyncio.to_thread(write_verification_logs, prepared.log.parent, result)
-    return result, elapsed
