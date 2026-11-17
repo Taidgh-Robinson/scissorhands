@@ -15,6 +15,27 @@ PYTHON = shlex.quote(sys.executable)
 
 
 class RunVerificationTests(TestCase):
+    def test_reports_each_command_as_it_starts(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            commands = [
+                f"{PYTHON} -c \"from pathlib import Path; Path('first-finished').touch(); raise SystemExit(1)\"",
+                "echo second",
+            ]
+            starts = []
+
+            async def on_start(index, command):
+                if index == 2:
+                    self.assertTrue((root / "first-finished").exists())
+                starts.append((index, command))
+
+            result = asyncio.run(
+                run_verification(commands, root, on_command_started=on_start)
+            )
+
+        self.assertEqual(starts, list(enumerate(commands, start=1)))
+        self.assertEqual([r.return_code for r in result.results], [1, 0])
+
     def test_reports_each_command_result(self) -> None:
         with TemporaryDirectory() as directory:
             result = asyncio.run(
