@@ -315,7 +315,7 @@ that a process is still alive. Receipts and manifests retain their original fiel
 including the distinction between agent claims and harness verification decisions.
 
 Run artifact kinds are `manifest`, `settings`, `work_item`, `work_item_toml`, `report`,
-and `patch`. Supplying `loop=N` selects loop kinds: `receipt`, `report`, `agent_output`,
+`patch`, and `activity`. Supplying `loop=N` selects loop kinds: `receipt`, `report`, `agent_output`,
 `final_message`, `status`, `plan`, `progress`, `prompt`, `patch`, and `verification_output`.
 The latter also requires `verification=N`. Callers cannot supply arbitrary filenames;
 file symlinks must resolve inside the selected run.
@@ -426,6 +426,38 @@ The API reads run data, maintains its project registry, and can write a generate
 or cancel runs. Keep it bound to localhost unless you add authentication: reports
 may contain saved prompts, logs, and patches from the registered folders, and the
 work-item endpoint will write files into those folders on request.
+
+### Watching a run
+
+Poll the run-detail route to read the latest loop activity alongside the run state.
+For a smaller response, poll the same route with `/artifacts/activity` appended.
+When `activity.state` in run detail is `available`, its `data` looks like this:
+
+```json
+{
+  "loop": 2,
+  "phase": "verifying",
+  "phase_started_at": "2026-11-17T12:00:00+00:00",
+  "verification": {
+    "index": 2,
+    "total": 3,
+    "command": "python -m unittest discover -s tests -v",
+    "started_at": "2026-11-17T12:00:04+00:00"
+  }
+}
+```
+
+The phases are `preparing` (setting up the loop), `agent` (invoking the agent),
+`assessing` (reading the agent's claims), `verifying` (running the work item's checks),
+and `finalizing` (saving the results). Compute elapsed time from the UTC timestamps.
+Command indexes start at 1. The verification phase keeps its start time as commands advance.
+`verification` is null until the built-in verifier reports a command. Custom batch verifiers
+report the phase only. Verification output is available after the batch returns.
+
+The harness atomically replaces `activity.json` at phase and command transitions and removes
+it when the loop exits. Expect `state: "missing"` on older runs, while queued, between loops,
+and after completion or cancellation. Use the run manifest for the overall outcome.
+A hard process kill can leave the last observed phase on disk.
 
 ### Development checks
 

@@ -1,5 +1,9 @@
+import asyncio
 import importlib.util
 import json
+import shlex
+import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase, skipIf
@@ -56,6 +60,7 @@ class ReportingApiTests(TestCase):
         self.assertEqual(detail.json()["summary"]["outcome"], "agent_failed")
         self.assertEqual(detail.json()["settings"]["data"]["agent"], "codex")
         self.assertEqual(detail.json()["loops"], [1])
+        self.assertEqual(detail.json()["activity"]["state"], "missing")
         self.assertEqual(
             self.client.get(prefix + "/loops/1").json()["receipt"]["data"],
             {"outcome": "completed"},
@@ -67,6 +72,77 @@ class ReportingApiTests(TestCase):
             (log["data"], log["total_bytes"], log["truncated"]), ("cd", 6, True)
         )
         self.assertEqual(self.client.get("/openapi.json").status_code, 200)
+
+    def test_poll_activity_while_verification_commands_run(self) -> None:
+        from scissorhands.application import RunRequest, RunService
+
+        project = self.register(self.first)
+        (self.first / "wait_for_release.py").write_text(
+            "import sys, time\nfrom pathlib import Path\n"
+            "while not Path(sys.argv[1]).exists():\n    time.sleep(0.02)\n"
+        )
+        commands = [
+            shlex.join([sys.executable, "wait_for_release.py", f"release-{n}"])
+            for n in (1, 2)
+        ]
+        created = self.client.post(
+            f"/api/projects/{project['id']}/work-items",
+            json=self.minimal_work_item(verification=commands),
+        )
+        self.assertEqual(created.status_code, 201)
+        prefix = f"/api/projects/{project['id']}/work-items/GEN-1/runs/run-0001"
+
+        def invoke(command, prompt, log, cwd):
+            log.write_text("Ready to verify")
+            return 0
+
+        async def watch() -> None:
+            service = RunService(
+                self.first, invoke=invoke, find_executable=lambda _: sys.executable
+            )
+            config, paths = await service.reserve(
+                RunRequest(agent="opencode", max_iterations=1)
+            )
+            self.assertEqual(
+                self.client.get(prefix).json()["activity"]["state"], "missing"
+            )
+            phase_starts = []
+            async with asyncio.TaskGroup() as group:
+                group.create_task(service.run_reserved(config, paths))
+                for index, command in enumerate(commands, 1):
+                    async with asyncio.timeout(5):
+                        while True:
+                            snapshot = self.client.get(prefix).json()["activity"][
+                                "data"
+                            ]
+                            verification = snapshot and snapshot["verification"]
+                            if verification and verification["index"] == index:
+                                break
+                            await asyncio.sleep(0.02)
+                    self.assertEqual(
+                        (snapshot["phase"], snapshot["loop"]), ("verifying", 1)
+                    )
+                    self.assertEqual(
+                        (verification["command"], verification["total"]), (command, 2)
+                    )
+                    phase_start = datetime.fromisoformat(snapshot["phase_started_at"])
+                    command_start = datetime.fromisoformat(verification["started_at"])
+                    self.assertLessEqual(phase_start, command_start)
+                    self.assertLessEqual(command_start, datetime.now(UTC))
+                    phase_starts.append(phase_start)
+                    self.assertEqual(
+                        self.client.get(prefix + "/artifacts/activity").json()["data"],
+                        snapshot,
+                    )
+                    (self.first / f"release-{index}").touch()
+            self.assertEqual(phase_starts[0], phase_starts[1])
+
+        asyncio.run(watch())
+        detail = self.client.get(prefix).json()
+        self.assertEqual(detail["summary"]["state"], "finished")
+        self.assertEqual(detail["activity"]["state"], "missing")
+        receipt = self.client.get(prefix + "/loops/1").json()["receipt"]["data"]
+        self.assertTrue(receipt["verification"]["passed"])
 
     def test_registration_errors_and_unavailable_folder(self) -> None:
         response = self.client.post("/api/projects", json={"path": "relative"})

@@ -42,6 +42,7 @@ class RunDetail:
     settings: Artifact
     work_item: Artifact
     loops: tuple[int, ...]
+    activity: Artifact = Artifact("missing")
 
 
 @dataclass(frozen=True, slots=True)

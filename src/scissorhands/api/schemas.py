@@ -11,7 +11,7 @@ RunState = Literal[
     "queued", "running", "finished", "cancelled", "interrupted", "unknown"
 ]
 RunArtifactKind = Literal[
-    "manifest", "settings", "work_item", "work_item_toml", "report", "patch"
+    "manifest", "settings", "work_item", "work_item_toml", "report", "patch", "activity"
 ]
 LoopArtifactKind = Literal[
     "receipt",
@@ -83,6 +83,9 @@ class RunDetailResponse(BaseModel):
     settings: ArtifactResponse
     work_item: ArtifactResponse
     loops: list[int]
+    activity: ArtifactResponse = Field(
+        description="Latest loop phase and active verification command. Missing between loops and on older runs."
+    )
 
 
 class LoopDetailResponse(BaseModel):

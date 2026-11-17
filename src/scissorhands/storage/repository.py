@@ -49,6 +49,7 @@ class RunRepository:
             settings=self.read_artifact(work_item_id, run_id, "settings"),
             work_item=self.read_artifact(work_item_id, run_id, "work_item"),
             loops=self._layout.list_loop_numbers(run),
+            activity=self.read_artifact(work_item_id, run_id, "activity"),
         )
 
     def read_loop(self, work_item_id: str, run_id: str, number: int) -> LoopDetail:
