@@ -459,6 +459,27 @@ it when the loop exits. Expect `state: "missing"` on older runs, while queued, b
 and after completion or cancellation. Use the run manifest for the overall outcome.
 A hard process kill can leave the last observed phase on disk.
 
+### React frontend
+
+Start the reporting API with `uv run --extra api scissorhands-api`. In a second
+terminal, run the frontend with Node.js 22.13 or later:
+
+```sh
+cd frontend
+npm ci
+npm run dev
+```
+
+Open the URL printed by Vite, then select a registered project and run. The
+page shows the run outcome or the latest loop phase and verification command.
+SWR refreshes the selected run every two seconds while it is active.
+To register a local project, use the `POST /api/projects` example above.
+
+The development server forwards `/api` to `http://127.0.0.1:8000`. To use
+another API address, set `SCISSORHANDS_API_URL` when starting Vite. For a
+production build, run `npm run build`, serve `frontend/dist/`, and route
+`/api` on the same origin to FastAPI. Run the frontend tests with `npm test`.
+
 ### Development checks
 
 Run the full suite with the API extra installed before merging reporting changes:
