@@ -16,6 +16,7 @@ DEFAULT_TEXT_BYTES = 64 * 1024
 
 # Callers select a kind, never a filename supplied by an artifact or HTTP client.
 _RUN_ARTIFACTS = {
+    "activity": "activity.json",
     "manifest": "report.json",
     "settings": "run.json",
     "work_item": "work-item.json",

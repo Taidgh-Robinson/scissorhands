@@ -11,6 +11,7 @@ from unittest import IsolatedAsyncioTestCase
 from scissorhands.application import RunRequest, RunService
 from scissorhands.core.loop.processes import run_command
 from scissorhands.core.loop.verification import run_verification
+from scissorhands.core.verification import CommandResult, VerificationResult
 
 WORK_ITEM = """id = "ASYNC-1"
 title = "Test async runs"
@@ -65,6 +66,8 @@ class AsyncRunTests(IsolatedAsyncioTestCase):
                 root, invoke=invoke, find_executable=lambda _: sys.executable
             )
             config, paths = await service.reserve(RunRequest(agent="opencode"))
+            activity = paths.run_dir / "activity.json"
+            self.assertFalse(activity.exists())
             self.assertEqual(paths.run_dir.name, "run-0001")
             self.assertTrue((paths.run_dir / "report.json").is_file())
             self.assertEqual(
@@ -73,6 +76,9 @@ class AsyncRunTests(IsolatedAsyncioTestCase):
             )
             task = asyncio.create_task(service.run_reserved(config, paths))
             await asyncio.wait_for(entered.wait(), timeout=2)
+            snapshot = json.loads(activity.read_text())
+            self.assertEqual((snapshot["loop"], snapshot["phase"]), (1, "agent"))
+            self.assertIsNone(snapshot["verification"])
             await asyncio.sleep(0.05)
             task.cancel()
             with self.assertRaises(asyncio.CancelledError):
@@ -81,6 +87,39 @@ class AsyncRunTests(IsolatedAsyncioTestCase):
             self.assertEqual(manifest["state"], "cancelled")
             self.assertEqual(manifest["outcome"], "cancelled")
             self.assertIsNotNone(manifest["finished_at"])
+            self.assertFalse(activity.exists())
+
+    async def test_custom_verifier_sees_batch_activity_for_each_loop(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "WORK_ITEM.toml").write_text(WORK_ITEM + 'verification = ["check"]')
+            snapshots = []
+
+            def invoke(command, prompt, log, cwd):
+                log.write_text("Still working")
+                return 0
+
+            def verify(commands, cwd):
+                snapshots.append(json.loads(activity.read_text()))
+                return VerificationResult((CommandResult(commands[0], 0, "ok"),))
+
+            service = RunService(
+                root,
+                invoke=invoke,
+                verify=verify,
+                find_executable=lambda _: sys.executable,
+            )
+            config, paths = await service.reserve(
+                RunRequest(agent="opencode", max_iterations=2)
+            )
+            activity = paths.run_dir / "activity.json"
+            await service.run_reserved(config, paths)
+
+            self.assertEqual([s["loop"] for s in snapshots], [1, 2])
+            for snapshot in snapshots:
+                self.assertEqual(snapshot["phase"], "verifying")
+                self.assertIsNone(snapshot["verification"])
+            self.assertFalse(activity.exists())
 
     async def test_verification_can_be_cancelled(self) -> None:
         with TemporaryDirectory() as directory:

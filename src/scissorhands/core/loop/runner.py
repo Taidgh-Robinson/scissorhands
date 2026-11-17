@@ -12,6 +12,7 @@ from scissorhands.core.loop.observer import RunObserver
 from scissorhands.core.loop.processes import run_command
 from scissorhands.core.loop.verification import run_verification
 from scissorhands.core.planning import ImplementationPlan
+from scissorhands.storage.activity import LoopActivity, track_loop_activity
 from scissorhands.storage.paths import RunPaths
 from scissorhands.storage.runs import RunWriter, initialize_run
 
@@ -42,19 +43,26 @@ async def run_loop(
         if reserved:
             await asyncio.to_thread(writer.update_manifest, records)
         for number in range(1, config.max_iterations + 1):
-            record = await _run_iteration(
-                config,
-                writer,
+            async with track_loop_activity(
+                paths.run_dir,
                 number,
-                feedback,
-                invoke,
-                verify,
-                observer,
-                planning_feedback,
-                previous_plan,
-            )
-            await asyncio.to_thread(writer.save_iteration, record, records)
-            records.append(record)
+                len(config.work_item.verification),
+                observer.on_warning,
+            ) as activity:
+                record = await _run_iteration(
+                    config,
+                    writer,
+                    number,
+                    feedback,
+                    invoke,
+                    verify,
+                    observer,
+                    planning_feedback,
+                    previous_plan,
+                    activity,
+                )
+                await asyncio.to_thread(writer.save_iteration, record, records)
+                records.append(record)
             observer.on_iteration_finished(
                 record, paths.loop_dir(number) / f"iteration-{number}.log"
             )
@@ -87,12 +95,15 @@ async def _run_iteration(
     observer: RunObserver,
     planning_feedback: str | None,
     previous_plan: ImplementationPlan | None,
+    activity: LoopActivity,
 ) -> IterationRecord:
     loop_dir, status, progress = await asyncio.to_thread(writer.initialize_loop, number)
     prepared = await asyncio.to_thread(
         prepare_iteration, config, loop_dir, number, feedback, planning_feedback
     )
     before = await asyncio.to_thread(writer.capture_before, number)
+    if verify is run_verification:
+        verify = partial(run_verification, on_command_started=activity.command_started)
     record = await execute_iteration(
         config,
         prepared,
@@ -101,6 +112,7 @@ async def _run_iteration(
         invoke=invoke,
         verify=verify,
         observer=observer,
+        activity=activity,
         previous_plan=previous_plan,
     )
     return await asyncio.to_thread(writer.capture_changes, record, before)
