@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { loopArtifacts, pageBytes, useLoopArtifact, useLoopDetail, type LoopArtifactKind } from "./api/loops";
 import type { Artifact } from "./api/runs";
+import { useTheme } from "./themes";
 
 function ArtifactContent({ artifact }: { artifact: Artifact }) {
-  if (artifact.state !== "available") return <p>{artifact.state}</p>;
+  if (artifact.state !== "available") return <p className="artifact-state">{artifact.state}</p>;
   const { data } = artifact;
   return <pre>{typeof data === "string" ? data : JSON.stringify(data, null, 2)}</pre>;
 }
@@ -17,11 +18,12 @@ interface ArtifactProps {
 }
 
 function LoopArtifact({ loopUrl, live, kind, label, verification }: ArtifactProps) {
+  const { Button } = useTheme();
   const [offset, setOffset] = useState(0);
   const { data, error, isLoading } = useLoopArtifact(loopUrl, kind, live, offset, verification);
   const end = data ? data.offset + data.bytes_read : 0;
   return (
-    <section aria-label={label}>
+    <section aria-label={label} className="artifact">
       <h4>{label}</h4>
       {isLoading && <p>Loading…</p>}
       {error && <p role="alert">Could not load {label.toLowerCase()}. {error.message}</p>}
@@ -30,10 +32,10 @@ function LoopArtifact({ loopUrl, live, kind, label, verification }: ArtifactProp
         <p>Bytes {data.offset + 1}–{end} of {data.total_bytes}</p>
       )}
       {offset > 0 && (
-        <button onClick={() => setOffset(Math.max(0, offset - pageBytes))}>Previous page</button>
+        <Button onClick={() => setOffset(Math.max(0, offset - pageBytes))}>Previous page</Button>
       )}
       {data?.truncated && data.total_bytes !== null && end < data.total_bytes && (
-        <button onClick={() => setOffset(end)}>Next page</button>
+        <Button onClick={() => setOffset(end)}>Next page</Button>
       )}
     </section>
   );
@@ -51,12 +53,14 @@ export default function LoopDetail({ loopUrl, number, live, verification }: Loop
   const commands = data?.receipt.data?.verification?.commands;
   const checks = Array.isArray(commands) ? commands : verification;
   return (
-    <section aria-label={`Loop ${number} details`}>
+    <section aria-label={`Loop ${number} details`} className="loop-detail">
       <h3>Loop {number}</h3>
-      <h4>Receipt</h4>
-      {isLoading && <p>Loading receipt…</p>}
-      {error && <p role="alert">Could not load loop receipt. {error.message}</p>}
-      {data && <ArtifactContent artifact={data.receipt} />}
+      <section className="artifact" aria-label="Receipt">
+        <h4>Receipt</h4>
+        {isLoading && <p>Loading receipt…</p>}
+        {error && <p role="alert">Could not load loop receipt. {error.message}</p>}
+        {data && <ArtifactContent artifact={data.receipt} />}
+      </section>
       {loopArtifacts.map(([kind, label]) => (
         <LoopArtifact key={kind} loopUrl={loopUrl} live={live} kind={kind} label={label} />
       ))}

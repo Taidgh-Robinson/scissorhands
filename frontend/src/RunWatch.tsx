@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { isLoopActivity, isTerminal, type LoopActivity } from "./api/activity";
 import { useRunDetail, type RunDetail } from "./api/runs";
 import LoopDetail from "./LoopDetail";
+import { useTheme } from "./themes";
 
 function StartTime({ start, now }: { start: string; now: number }) {
   const date = new Date(start);
@@ -55,32 +56,37 @@ function ReportedActivity({ artifact }: { artifact: RunDetail["activity"] }) {
 }
 
 export default function RunWatch({ url }: { url: string }) {
+  const { Choice } = useTheme();
   const { data, error, isLoading } = useRunDetail(url);
   const [selectedLoop, setSelectedLoop] = useState<number | null>(null);
   const loop = data?.loops.find(number => number === selectedLoop);
   const verification = data?.work_item?.data?.verification;
 
   return (
-    <section aria-label="Run detail">
-      <h2>Run detail</h2>
+    <section aria-label="Run detail" className="run-content">
       {isLoading && <p>Loading run…</p>}
       {error && <p role="alert">Could not refresh this run. {error.message}</p>}
       {data && (
         <>
-          <p>{data.summary.work_item_id} / {data.summary.run_id} · {data.summary.state}</p>
-          {data.summary.outcome && <p>Outcome: {data.summary.outcome}</p>}
+          <div className="run-summary">
+            <div>
+              <p className="item-id">{data.summary.work_item_id}</p>
+              <h3 className="run-id">{data.summary.run_id}</h3>
+            </div>
+            <span className="run-state">{data.summary.state}</span>
+          </div>
+          {data.summary.outcome && <p className="outcome">Outcome: <strong>{data.summary.outcome}</strong></p>}
           {!isTerminal(data.summary.state) && <ReportedActivity artifact={data.activity} />}
           {data.loops.length > 0 ? (
-            <label>
-              Loop{" "}
-              <select
-                value={loop ?? ""}
-                onChange={event => setSelectedLoop(Number(event.target.value) || null)}
-              >
-                <option value="">Select a loop</option>
-                {data.loops.map(number => <option key={number} value={number}>{number}</option>)}
-              </select>
-            </label>
+            <Choice
+              label="Loop"
+              value={loop === undefined ? "" : String(loop)}
+              options={[
+                { value: "", label: "Select a loop" },
+                ...data.loops.map(number => ({ value: String(number), label: `Loop ${number}` })),
+              ]}
+              onChange={value => setSelectedLoop(Number(value) || null)}
+            />
           ) : <p>No loops recorded yet.</p>}
           {loop !== undefined && (
             <LoopDetail

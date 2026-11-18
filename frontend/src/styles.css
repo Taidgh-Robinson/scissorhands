@@ -1,0 +1,5 @@
+@import "./themes/blackchalk.css";
+@import "./themes/plain.css";
+
+* { box-sizing: border-box; }
+body { margin: 0; }

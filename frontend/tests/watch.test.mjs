@@ -3,10 +3,16 @@ import test from "node:test";
 import { setTimeout as wait } from "node:timers/promises";
 import { JSDOM } from "jsdom";
 
-async function renderApp(t) {
+async function renderApp(t, savedTheme) {
   const dom = new JSDOM('<main id="test-root"></main>', { url: "http://localhost/" });
   globalThis.window = dom.window;
   globalThis.document = dom.window.document;
+  // jsdom has no layout engine. BlackChalk observes element sizes for its ink strokes.
+  globalThis.ResizeObserver = class {
+    observe() {}
+    disconnect() {}
+  };
+  if (savedTheme) dom.window.localStorage.setItem("scissorhands.viewer.theme", savedTheme);
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const { createElement, act } = await import("react");
   const { createRoot } = await import("react-dom/client");
@@ -17,12 +23,23 @@ async function renderApp(t) {
   t.after(async () => {
     await act(() => root.unmount());
     dom.window.close();
+    delete globalThis.ResizeObserver;
     delete globalThis.IS_REACT_ACT_ENVIRONMENT;
     delete globalThis.document;
     delete globalThis.window;
   });
 
   async function select(label, value) {
+    const combobox = container.querySelector(`[role="combobox"][aria-label="${label}"]`);
+    if (combobox) {
+      await act(() => combobox.click());
+      const option = [...container.querySelectorAll('[role="option"]')].find(
+        element => element.textContent === value
+      );
+      assert.ok(option, `Missing ${label} option ${value}`);
+      await act(() => option.click());
+      return;
+    }
     const input = [...container.querySelectorAll("select")].find(
       element => element.labels[0].textContent.trim().startsWith(label)
     );
@@ -72,12 +89,12 @@ test("select a run, follow verification, and stop polling detail at completion",
   });
 
   const { container, select, act } = await renderApp(t);
-  await select("Project", "project-1");
-  await select("Run", runUrl);
+  await select("Project", "Example");
+  await select("Run", "TASK / run-0001 (running)");
   assert.match(container.textContent, /Verification command 2 of 3/);
   assert.equal(container.querySelector("code").textContent, "make test");
   assert.equal(container.querySelector("time").dateTime, started);
-  await select("Loop", "2");
+  await select("Loop", "Loop 2");
   assert.match(container.textContent, /Receiptmissing/);
 
   summary.state = "finished";
@@ -143,11 +160,11 @@ test("a finished run shows the selected loop's receipt, artifacts and paged veri
     });
   });
 
-  const { container, select, act } = await renderApp(t);
-  await select("Project", "project-1");
-  await select("Run", runUrl);
+  const { container, select, act } = await renderApp(t, "retired-theme");
+  await select("Project", "Example");
+  await select("Run", "TASK / run-0001 (completed)");
   assert.deepEqual(loopRequests, []);
-  await select("Loop", "1");
+  await select("Loop", "Loop 1");
   assert.ok(loopRequests.every(url => url.startsWith(`${runUrl}/loops/1`)));
   assert.match(container.textContent, /receipt for loop 1/);
   for (const content of Object.values(artifactData)) {
@@ -161,12 +178,26 @@ test("a finished run shows the selected loop's receipt, artifacts and paged veri
   assert.equal(log.querySelector("pre").textContent, firstPage);
   await act(() => log.querySelector("button").click());
   assert.equal(log.querySelector("pre").textContent, "end of second check");
+  await select("Theme", "plain");
+  assert.equal(container.querySelector("[data-ui-theme]").dataset.uiTheme, "plain");
+  assert.equal(window.localStorage.getItem("scissorhands.viewer.theme"), "plain");
+  assert.equal(log.querySelector("pre").textContent, "end of second check");
+  assert.match(container.textContent, /receipt for loop 1/);
+  await select("Theme", "blackchalk");
   await act(() => log.querySelector("button").click());
   assert.equal(log.querySelector("pre").textContent, firstPage);
 
-  await select("Loop", "2");
+  await select("Loop", "Loop 2");
   assert.match(container.textContent, /receipt for loop 2/);
   assert.doesNotMatch(container.textContent, /receipt for loop 1|Verification output/);
-  await select("Loop", "");
+  await select("Loop", "Select a loop");
   assert.equal(container.querySelector("pre"), null);
+});
+
+test("restores the saved theme and renders its project control", async t => {
+  t.mock.method(globalThis, "fetch", async () => Response.json([]));
+  const { container } = await renderApp(t, "plain");
+  assert.equal(container.querySelector("[data-ui-theme]").dataset.uiTheme, "plain");
+  assert.equal(container.querySelector(".theme-picker select").value, "plain");
+  assert.ok(container.querySelector(".fields select").disabled);
 });

@@ -19,8 +19,8 @@ export function useProjects() {
   return useSWR("/api/projects", fetchJson<Project[]>, { refreshInterval: 10000 });
 }
 
-export function useProjectRuns(projectId: string) {
-  return useSWR(`${projectPath(projectId)}/runs`, fetchJson<RunSummary[]>, {
+export function useProjectRuns(projectId: string | null) {
+  return useSWR(projectId ? `${projectPath(projectId)}/runs` : null, fetchJson<RunSummary[]>, {
     refreshInterval: 5000,
   });
 }

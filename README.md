@@ -477,6 +477,14 @@ verification logs. Long text has previous and next page controls.
 SWR refreshes the selected run every two seconds while it is active.
 To register a local project, use the `POST /api/projects` example above.
 
+The Theme picker offers BlackChalk and Plain and remembers the choice in the
+current browser. Switching themes keeps the open run, loop, and log page.
+To add another UI library, implement `ViewerTheme` from
+`frontend/src/themes/types.ts`, register the adapter in
+`frontend/src/themes/index.tsx`, and import its stylesheet in
+`frontend/src/styles.css`. Scope theme styles under the adapter's
+`[data-ui-theme]` value. The viewer owns selection and polling across themes.
+
 The development server forwards `/api` to `http://127.0.0.1:8000`. To use
 another API address, set `SCISSORHANDS_API_URL` when starting Vite. For a
 production build, run `npm run build`, serve `frontend/dist/`, and route
