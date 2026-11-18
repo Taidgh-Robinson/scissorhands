@@ -28,10 +28,17 @@ export function useProjectRuns(projectId: string) {
 export interface RunDetail {
   summary: RunSummary;
   loops: number[];
-  activity?: {
-    state: "available" | "missing" | "invalid" | "unavailable" | "unsafe" | "too_large";
-    data: unknown;
-  };
+  activity?: Artifact;
+  work_item: Artifact<{ verification?: string[] }>;
+}
+
+export interface Artifact<T = Record<string, unknown> | string> {
+  state: "available" | "missing" | "invalid" | "unavailable" | "unsafe" | "too_large";
+  data: T | null;
+  offset: number;
+  bytes_read: number;
+  total_bytes: number | null;
+  truncated: boolean;
 }
 
 export function useRunDetail(url: string) {

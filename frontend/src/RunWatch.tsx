@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { isLoopActivity, isTerminal, type LoopActivity } from "./api/activity";
 import { useRunDetail, type RunDetail } from "./api/runs";
+import LoopDetail from "./LoopDetail";
 
 function StartTime({ start, now }: { start: string; now: number }) {
   const date = new Date(start);
@@ -55,6 +56,9 @@ function ReportedActivity({ artifact }: { artifact: RunDetail["activity"] }) {
 
 export default function RunWatch({ url }: { url: string }) {
   const { data, error, isLoading } = useRunDetail(url);
+  const [selectedLoop, setSelectedLoop] = useState<number | null>(null);
+  const loop = data?.loops.find(number => number === selectedLoop);
+  const verification = data?.work_item?.data?.verification;
 
   return (
     <section aria-label="Run detail">
@@ -65,8 +69,28 @@ export default function RunWatch({ url }: { url: string }) {
         <>
           <p>{data.summary.work_item_id} / {data.summary.run_id} · {data.summary.state}</p>
           {data.summary.outcome && <p>Outcome: {data.summary.outcome}</p>}
-          {data.loops.length > 0 && <p>Loops: {data.loops.join(", ")}</p>}
           {!isTerminal(data.summary.state) && <ReportedActivity artifact={data.activity} />}
+          {data.loops.length > 0 ? (
+            <label>
+              Loop{" "}
+              <select
+                value={loop ?? ""}
+                onChange={event => setSelectedLoop(Number(event.target.value) || null)}
+              >
+                <option value="">Select a loop</option>
+                {data.loops.map(number => <option key={number} value={number}>{number}</option>)}
+              </select>
+            </label>
+          ) : <p>No loops recorded yet.</p>}
+          {loop !== undefined && (
+            <LoopDetail
+              key={loop}
+              loopUrl={`${url}/loops/${loop}`}
+              number={loop}
+              live={loop === data.loops.at(-1) && !isTerminal(data.summary.state)}
+              verification={Array.isArray(verification) ? verification : []}
+            />
+          )}
         </>
       )}
     </section>

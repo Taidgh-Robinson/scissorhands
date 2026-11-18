@@ -472,6 +472,8 @@ npm run dev
 
 Open the URL printed by Vite, then select a registered project and run. The
 page shows the run outcome or the latest loop phase and verification command.
+Select a loop to read its receipt, prompt, reports, agent output, patch, and
+verification logs. Long text has previous and next page controls.
 SWR refreshes the selected run every two seconds while it is active.
 To register a local project, use the `POST /api/projects` example above.
 
