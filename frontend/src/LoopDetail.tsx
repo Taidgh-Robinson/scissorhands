@@ -1,33 +1,25 @@
 import { useState } from "react";
 import { loopArtifacts, pageBytes, useLoopArtifact, useLoopDetail, type LoopArtifactKind } from "./api/loops";
-import type { Artifact } from "./api/runs";
+import ArtifactPanel from "./ArtifactPanel";
 import { useTheme } from "./themes";
-
-function ArtifactContent({ artifact }: { artifact: Artifact }) {
-  if (artifact.state !== "available") return <p className="artifact-state">{artifact.state}</p>;
-  const { data } = artifact;
-  return <pre>{typeof data === "string" ? data : JSON.stringify(data, null, 2)}</pre>;
-}
 
 interface ArtifactProps {
   loopUrl: string;
   live: boolean;
   kind: LoopArtifactKind;
   label: string;
+  filename: string;
+  files: ReadonlySet<string>;
   verification?: number;
 }
 
-function LoopArtifact({ loopUrl, live, kind, label, verification }: ArtifactProps) {
+function LoopArtifact({ loopUrl, live, kind, label, filename, files, verification }: ArtifactProps) {
   const { Button } = useTheme();
   const [offset, setOffset] = useState(0);
   const { data, error, isLoading } = useLoopArtifact(loopUrl, kind, live, offset, verification);
   const end = data ? data.offset + data.bytes_read : 0;
   return (
-    <section aria-label={label} className="artifact">
-      <h4>{label}</h4>
-      {isLoading && <p>Loading…</p>}
-      {error && <p role="alert">Could not load {label.toLowerCase()}. {error.message}</p>}
-      {data && <ArtifactContent artifact={data} />}
+    <ArtifactPanel label={label} filename={filename} files={files} artifact={data} loading={isLoading} error={error}>
       {data?.truncated && data.bytes_read > 0 && (
         <p>Bytes {data.offset + 1}–{end} of {data.total_bytes}</p>
       )}
@@ -37,7 +29,7 @@ function LoopArtifact({ loopUrl, live, kind, label, verification }: ArtifactProp
       {data?.truncated && data.total_bytes !== null && end < data.total_bytes && (
         <Button onClick={() => setOffset(end)}>Next page</Button>
       )}
-    </section>
+    </ArtifactPanel>
   );
 }
 
@@ -52,27 +44,24 @@ export default function LoopDetail({ loopUrl, number, live, verification }: Loop
   const { data, error, isLoading } = useLoopDetail(loopUrl, live);
   const commands = data?.receipt.data?.verification?.commands;
   const checks = Array.isArray(commands) ? commands : verification;
+  const receiptFile = `iteration-${number}.json`;
+  const artifacts = [
+    ...loopArtifacts.map(([kind, label, template]) => ({
+      kind, label, filename: template.replace("{number}", String(number)),
+    })),
+    ...checks.map((_, index) => ({
+      kind: "verification_output" as const, label: `Verification output ${index + 1}`,
+      filename: `verification-${index + 1}.log`, verification: index + 1,
+    })),
+  ];
+  const files = new Set([receiptFile, ...artifacts.map(artifact => artifact.filename)]);
   return (
     <section aria-label={`Loop ${number} details`} className="loop-detail">
       <h3>Loop {number}</h3>
-      <section className="artifact" aria-label="Receipt">
-        <h4>Receipt</h4>
-        {isLoading && <p>Loading receipt…</p>}
-        {error && <p role="alert">Could not load loop receipt. {error.message}</p>}
-        {data && <ArtifactContent artifact={data.receipt} />}
-      </section>
-      {loopArtifacts.map(([kind, label]) => (
-        <LoopArtifact key={kind} loopUrl={loopUrl} live={live} kind={kind} label={label} />
-      ))}
-      {checks.map((_, index) => (
-        <LoopArtifact
-          key={index}
-          loopUrl={loopUrl}
-          live={live}
-          kind="verification_output"
-          label={`Verification output ${index + 1}`}
-          verification={index + 1}
-        />
+      <ArtifactPanel label="Receipt" filename={receiptFile} files={files} artifact={data?.receipt}
+        loading={isLoading} error={error} />
+      {artifacts.map(artifact => (
+        <LoopArtifact key={artifact.filename} {...artifact} files={files} loopUrl={loopUrl} live={live} />
       ))}
     </section>
   );

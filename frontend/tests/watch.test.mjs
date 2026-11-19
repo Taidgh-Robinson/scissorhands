@@ -105,7 +105,7 @@ test("select a run, follow verification, and stop polling detail at completion",
     await act(() => wait(50));
   }
   assert.match(container.textContent, /Outcome: completed/);
-  assert.match(container.textContent, /"completion_accepted": true/);
+  assert.equal(container.querySelector('[aria-label="Receipt"] li').textContent, "completion_accepted: true");
   assert.equal(container.querySelector("code"), null);
   const finalReads = detailReads;
   const finalLoopReads = loopReads;
@@ -122,10 +122,16 @@ test("a finished run shows the selected loop's receipt, artifacts and paged veri
   const firstPage = "é".repeat(pageSize / 2);
   const logs = ["first check", firstPage + "end of second check"];
   const loopRequests = [];
+  const report = [
+    "# Loop report", "", "Outcome: **completed**.", "", "## Verification", "",
+    "| Command | Output |", "| --- | --- |",
+    "| `make test` | passed<br>[log](verification-1.log) |",
+  ].join("\n");
+  const promptPage = "```text\n" + "x".repeat(pageSize - 8);
   const artifactData = {
-    report: "Loop report", prompt: "Saved prompt", agent_output: "Output\nline 2",
-    final_message: "Final answer", status: { criteria: ["done"] },
-    plan: null, progress: "Saved progress", patch: "+new line",
+    report, prompt: promptPage + "\n# inside the fence\n```", agent_output: "# Output\nline 2",
+    final_message: "- Final answer", status: { criteria: [{ met: true }] },
+    plan: null, progress: "```sh\nmake test\n```", patch: "+new line",
   };
   t.mock.method(globalThis, "fetch", async url => {
     if (url === "/api/projects") return Response.json([{ id: "project-1", name: "Example", available: true }]);
@@ -167,10 +173,42 @@ test("a finished run shows the selected loop's receipt, artifacts and paged veri
   await select("Loop", "Loop 1");
   assert.ok(loopRequests.every(url => url.startsWith(`${runUrl}/loops/1`)));
   assert.match(container.textContent, /receipt for loop 1/);
-  for (const content of Object.values(artifactData)) {
-    if (typeof content === "string") assert.ok(container.textContent.includes(content));
-  }
-  assert.match(container.textContent, /"criteria": \[/);
+  const section = label => container.querySelector(`section[aria-label="${label}"]`);
+  const clickButton = (section, text) => act(() => {
+    const button = [...section.querySelectorAll("button")].find(button => button.textContent === text);
+    assert.ok(button, `Missing button ${text}`);
+    button.click();
+  });
+  const rendered = section("Report");
+  assert.equal(rendered.querySelector("h1").textContent, "Loop report");
+  assert.equal(rendered.querySelector("strong").textContent, "completed");
+  assert.deepEqual([...rendered.querySelectorAll("th")].map(th => th.textContent), ["Command", "Output"]);
+  assert.equal(rendered.querySelector("td code").textContent, "make test");
+  const logLink = rendered.querySelector("td br + a");
+  assert.equal(document.getElementById(logLink.hash.slice(1)), section("Verification output 1"));
+  await clickButton(rendered, "Show source");
+  assert.equal(rendered.querySelector("pre").textContent, report);
+  await clickButton(rendered, "Show formatted");
+  assert.ok(rendered.querySelector("table"));
+  assert.equal(section("Final message").querySelector("li").textContent, "Final answer");
+  assert.equal(section("Progress").querySelector("pre code").textContent.trimEnd(), "make test");
+  assert.equal(section("Agent output").querySelector("pre").textContent, artifactData.agent_output);
+  assert.equal(section("Patch").querySelector("pre").textContent, artifactData.patch);
+  const status = section("Status");
+  const expand = async details => {
+    await act(async () => { details.querySelector("summary").click(); await wait(0); });
+  };
+  assert.equal(status.querySelector("summary").textContent, "criteria 1 item");
+  assert.equal(status.querySelector("details").open, false);
+  await expand(status.querySelector("details"));
+  await expand(status.querySelector("details details"));
+  assert.equal(status.querySelector(".json-literal").textContent, "true");
+  await clickButton(status, "Show source");
+  assert.deepEqual(JSON.parse(status.querySelector("pre").textContent), artifactData.status);
+  const prompt = section("Prompt");
+  assert.equal(prompt.querySelector("pre").textContent, promptPage);
+  await clickButton(prompt, "Next page");
+  assert.equal(prompt.querySelector("pre").textContent, "\n# inside the fence\n```");
   assert.match(container.textContent, /Planmissing/);
   assert.match(container.textContent, /Verification output 1first check/);
 
@@ -182,6 +220,12 @@ test("a finished run shows the selected loop's receipt, artifacts and paged veri
   assert.equal(container.querySelector("[data-ui-theme]").dataset.uiTheme, "plain");
   assert.equal(window.localStorage.getItem("scissorhands.viewer.theme"), "plain");
   assert.equal(log.querySelector("pre").textContent, "end of second check");
+  assert.ok(rendered.querySelector("table"));
+  assert.ok(status.querySelector("pre"));
+  await clickButton(prompt, "Show formatted");
+  assert.ok(prompt.querySelector(".artifact-markdown"));
+  await clickButton(prompt, "Previous page");
+  assert.equal(prompt.querySelector("pre code").textContent.trimEnd().length, pageSize - 8);
   assert.match(container.textContent, /receipt for loop 1/);
   await select("Theme", "blackchalk");
   await act(() => log.querySelector("button").click());

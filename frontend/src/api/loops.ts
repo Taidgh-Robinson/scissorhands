@@ -56,14 +56,14 @@ export interface LoopDetail {
 }
 
 export const loopArtifacts = [
-  ["report", "Report"],
-  ["prompt", "Prompt"],
-  ["agent_output", "Agent output"],
-  ["final_message", "Final message"],
-  ["status", "Status"],
-  ["plan", "Plan"],
-  ["progress", "Progress"],
-  ["patch", "Patch"],
+  ["report", "Report", "iteration-{number}.md"],
+  ["prompt", "Prompt", "prompt.md"],
+  ["agent_output", "Agent output", "iteration-{number}.log"],
+  ["final_message", "Final message", "iteration-{number}.final.txt"],
+  ["status", "Status", "status.json"],
+  ["plan", "Plan", "plan.json"],
+  ["progress", "Progress", "progress.md"],
+  ["patch", "Patch", "changes.patch"],
 ] as const;
 
 export type LoopArtifactKind = typeof loopArtifacts[number][0] | "verification_output";

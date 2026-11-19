@@ -3,3 +3,63 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; }
+
+[data-ui-theme] .artifact-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: .65rem;
+}
+[data-ui-theme] .artifact-heading h4 { margin: 0; }
+
+[data-ui-theme] :is(.artifact-markdown, .artifact-json) {
+  max-height: 32rem;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+[data-ui-theme] .artifact-markdown {
+  & > :first-child { margin-top: 0; }
+  & > :last-child { margin-bottom: 0; }
+  & :is(h1, h2, h3, h4, h5, h6) {
+    margin: 1.2em 0 .4em;
+    font-size: 1.1rem;
+    line-height: 1.2;
+    letter-spacing: normal;
+  }
+  & h1 { font-size: 1.65rem; }
+  & h2 { font-size: 1.35rem; }
+  & :is(p, ul, ol, blockquote, pre, table) { margin-block: .65em; }
+  & :is(ul, ol) { padding-inline-start: 1.6rem; }
+  & li > :is(ul, ol) { margin-block: .2em; }
+  & blockquote {
+    margin-inline: 0;
+    padding-inline-start: .9rem;
+    border-inline-start: 3px solid var(--sketch-border, silver);
+  }
+  & :not(pre) > code {
+    padding: .1em .3em;
+    border-radius: 3px;
+    background: var(--sketch-bg, #f5f5f5);
+    font-size: .9em;
+  }
+  & table { width: 100%; border-collapse: collapse; font-size: .9em; }
+  & :is(th, td) { padding: .45em .65em; border: 1px solid var(--sketch-border, silver); vertical-align: top; }
+  & th { text-align: start; background: var(--sketch-bg, #f5f5f5); }
+  & a { color: #265981; text-underline-offset: .15em; }
+}
+[data-ui-theme] .artifact-json {
+  padding: .75rem 1rem;
+  background: var(--sketch-bg, #f5f5f5);
+  border-inline-start: 2px solid var(--sketch-border, silver);
+  font: .85rem/1.65 var(--code-font, ui-monospace, monospace);
+  & .json-fields { list-style: none; margin: 0; padding: 0; }
+  & .json-fields .json-fields { margin-inline-start: .4rem; padding-inline-start: 1rem; border-inline-start: 1px solid silver; }
+  & li { padding-block: .1rem; }
+  & summary { cursor: pointer; }
+  & .json-key { color: #234d79; font-weight: 600; }
+  & .json-string { color: #2b5a40; white-space: pre-wrap; }
+  & .json-literal { color: #743e66; }
+  & .json-count { color: #595959; font-size: .9em; }
+}

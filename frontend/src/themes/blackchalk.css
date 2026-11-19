@@ -95,14 +95,14 @@
   & .loop-detail { min-width: 0; border-top: 1px solid var(--sketch-fg); padding-block-start: var(--sketch-space-6); }
   & .artifact { padding-block: var(--sketch-space-4); border-bottom: 1px dashed var(--sketch-border); }
   & .artifact:last-child { border: 0; padding-bottom: 0; }
-  & .artifact h4 { font-size: var(--sketch-text-lg); margin-bottom: .5rem; }
+  & .artifact-heading h4 { font-size: var(--sketch-text-lg); }
   & .artifact-state { color: var(--sketch-accent); }
   & pre {
     margin: 0; padding: 1rem; max-height: 24rem; overflow: auto;
     background: var(--sketch-bg); border-inline-start: 2px solid var(--sketch-border);
     font: .84rem/1.6 var(--code-font); tab-size: 4;
   }
-  & .artifact button { margin: .5rem .5rem 0 0; }
+  & .artifact > button { margin: .5rem .5rem 0 0; }
   & [role="alert"] { border-inline-start: 3px solid var(--sketch-fg); padding-inline-start: .65rem; font-size: .9rem; }
 }
 @media (max-width: 720px) {
