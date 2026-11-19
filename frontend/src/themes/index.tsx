@@ -1,8 +1,8 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
-import { blackchalk } from "./blackchalk";
+import { blackchalk, blackchalkDark } from "./blackchalk";
 import { plain } from "./plain";
 
-export const themes = [blackchalk, plain];
+export const themes = [blackchalk, blackchalkDark, plain];
 const preferenceKey = "scissorhands.viewer.theme";
 
 function storedTheme() {
@@ -32,7 +32,7 @@ export function Viewer({ children }: { children: ReactNode }) {
   }
   return (
     <ThemeContext.Provider value={theme}>
-      <div className={theme.rootClass} data-ui-theme={theme.id}>
+      <div className={theme.rootClass} data-ui-theme={theme.id} data-theme={theme.colorScheme}>
         <header className="masthead">
           <div className="masthead-inner">
             <span className="wordmark"><span className="brand-symbol" aria-hidden="true">✂︎</span>Scissorhands</span>

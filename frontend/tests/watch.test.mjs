@@ -167,6 +167,8 @@ test("a finished run shows the selected loop's receipt, artifacts and paged veri
   });
 
   const { container, select, act } = await renderApp(t, "retired-theme");
+  const viewer = container.querySelector("[data-ui-theme]");
+  assert.equal(viewer.dataset.uiTheme, "blackchalk");
   await select("Project", "Example");
   await select("Run", "TASK / run-0001 (completed)");
   assert.deepEqual(loopRequests, []);
@@ -202,6 +204,11 @@ test("a finished run shows the selected loop's receipt, artifacts and paged veri
   assert.equal(status.querySelector("details").open, false);
   await expand(status.querySelector("details"));
   await expand(status.querySelector("details details"));
+  await select("Theme", "blackchalk-dark");
+  assert.equal(viewer.dataset.theme, "dark");
+  assert.equal(window.localStorage.getItem("scissorhands.viewer.theme"), "blackchalk-dark");
+  assert.ok(rendered.querySelector("table"));
+  assert.ok(status.querySelector("details details").open);
   assert.equal(status.querySelector(".json-literal").textContent, "true");
   await clickButton(status, "Show source");
   assert.deepEqual(JSON.parse(status.querySelector("pre").textContent), artifactData.status);
@@ -217,7 +224,8 @@ test("a finished run shows the selected loop's receipt, artifacts and paged veri
   await act(() => log.querySelector("button").click());
   assert.equal(log.querySelector("pre").textContent, "end of second check");
   await select("Theme", "plain");
-  assert.equal(container.querySelector("[data-ui-theme]").dataset.uiTheme, "plain");
+  assert.equal(viewer.dataset.uiTheme, "plain");
+  assert.equal(viewer.dataset.theme, undefined);
   assert.equal(window.localStorage.getItem("scissorhands.viewer.theme"), "plain");
   assert.equal(log.querySelector("pre").textContent, "end of second check");
   assert.ok(rendered.querySelector("table"));
@@ -228,6 +236,7 @@ test("a finished run shows the selected loop's receipt, artifacts and paged veri
   assert.equal(prompt.querySelector("pre code").textContent.trimEnd().length, pageSize - 8);
   assert.match(container.textContent, /receipt for loop 1/);
   await select("Theme", "blackchalk");
+  assert.equal(viewer.dataset.theme, "light");
   await act(() => log.querySelector("button").click());
   assert.equal(log.querySelector("pre").textContent, firstPage);
 
@@ -244,4 +253,12 @@ test("restores the saved theme and renders its project control", async t => {
   assert.equal(container.querySelector("[data-ui-theme]").dataset.uiTheme, "plain");
   assert.equal(container.querySelector(".theme-picker select").value, "plain");
   assert.ok(container.querySelector(".fields select").disabled);
+});
+
+test("restores BlackChalk Dark with its sketch controls on reload", async t => {
+  t.mock.method(globalThis, "fetch", async () => Response.json([]));
+  const { container } = await renderApp(t, "blackchalk-dark");
+  const viewer = container.querySelector('.sketch-paper[data-theme="dark"]');
+  assert.equal(viewer.querySelector(".theme-picker select").selectedOptions[0].textContent, "BlackChalk Dark");
+  assert.ok(viewer.querySelector('[role="combobox"][aria-label="Project"]'));
 });

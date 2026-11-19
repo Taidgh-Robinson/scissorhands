@@ -11,6 +11,7 @@ export interface ChoiceProps {
 export interface ViewerTheme {
   id: string;
   name: string;
+  colorScheme?: "light" | "dark";
   rootClass?: string;
   illustration?: string;
   Choice: ComponentType<ChoiceProps>;

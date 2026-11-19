@@ -477,7 +477,7 @@ verification logs. Long text has previous and next page controls.
 SWR refreshes the selected run every two seconds while it is active.
 To register a local project, use the `POST /api/projects` example above.
 
-The Theme picker offers BlackChalk and Plain and remembers the choice in the
+The Theme picker offers BlackChalk, BlackChalk Dark, and Plain and remembers the choice in the
 current browser. Switching themes keeps the open run, loop, and log page.
 To add another UI library, implement `ViewerTheme` from
 `frontend/src/themes/types.ts`, register the adapter in

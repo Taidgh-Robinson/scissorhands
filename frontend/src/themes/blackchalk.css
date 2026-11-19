@@ -1,18 +1,30 @@
 @import "blackchalk/styles.css";
 @import "blackchalk/fonts.css";
 
-[data-ui-theme="blackchalk"] {
+[data-ui-theme|="blackchalk"] {
   --reading-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --code-font: ui-monospace, "SFMono-Regular", Consolas, monospace;
   --sheet: Canvas;
-  color-scheme: light;
   min-height: 100vh;
   font-family: var(--reading-font);
   font-size: 1rem;
   line-height: 1.5;
 }
 
-[data-ui-theme="blackchalk"] {
+[data-ui-theme="blackchalk"] { color-scheme: light; }
+
+:root:has([data-ui-theme="blackchalk-dark"]) { color-scheme: dark; }
+
+[data-ui-theme="blackchalk-dark"] {
+  --sheet: #252527;
+  --artifact-link: #9fcdf9;
+  --json-key: #a4ccf4;
+  --json-string: #aed9b7;
+  --json-literal: #e4bae0;
+  & .intro-art { filter: invert(.93); }
+}
+
+[data-ui-theme|="blackchalk"] {
   & :is(h1, h2, h3, h4, p, dl, dd) { margin: 0; }
   & :is(h1, h2, h3, h4, .wordmark) {
     font-family: var(--sketch-font);
@@ -106,19 +118,19 @@
   & [role="alert"] { border-inline-start: 3px solid var(--sketch-fg); padding-inline-start: .65rem; font-size: .9rem; }
 }
 @media (max-width: 720px) {
-  [data-ui-theme="blackchalk"] .workspace { grid-template-columns: minmax(0, 1fr); }
-  [data-ui-theme="blackchalk"] .intro { min-height: 10rem; gap: .5rem; }
-  [data-ui-theme="blackchalk"] .intro-art { width: 25%; }
-  [data-ui-theme="blackchalk"] .fields { margin-block: 1rem; }
+  [data-ui-theme|="blackchalk"] .workspace { grid-template-columns: minmax(0, 1fr); }
+  [data-ui-theme|="blackchalk"] .intro { min-height: 10rem; gap: .5rem; }
+  [data-ui-theme|="blackchalk"] .intro-art { width: 25%; }
+  [data-ui-theme|="blackchalk"] .fields { margin-block: 1rem; }
 }
 @media (max-width: 440px) {
-  [data-ui-theme="blackchalk"] .masthead-inner { gap: .5rem; }
-  [data-ui-theme="blackchalk"] .wordmark { gap: .4rem; font-size: var(--sketch-text-md); }
-  [data-ui-theme="blackchalk"] .theme-picker svg { display: none; }
-  [data-ui-theme="blackchalk"] .intro-art { display: none; }
+  [data-ui-theme|="blackchalk"] .masthead-inner { gap: .5rem; }
+  [data-ui-theme|="blackchalk"] .wordmark { gap: .4rem; font-size: var(--sketch-text-md); }
+  [data-ui-theme|="blackchalk"] .theme-picker svg { display: none; }
+  [data-ui-theme|="blackchalk"] .intro-art { display: none; }
 }
 @media (max-width: 360px) {
-  [data-ui-theme="blackchalk"] .theme-picker span {
+  [data-ui-theme|="blackchalk"] .theme-picker span {
     position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
   }
 }
