@@ -461,8 +461,28 @@ A hard process kill can leave the last observed phase on disk.
 
 ### React frontend
 
-Start the reporting API with `uv run --extra api scissorhands-api`. In a second
-terminal, run the frontend with Node.js 22.13 or later:
+On macOS or Linux, use these scripts with Python 3.12+, uv, and Node.js 22.13 or later:
+
+```sh
+./scripts/dev-up
+# When finished
+./scripts/dev-down
+```
+
+`dev-up` starts the reporting API and Vite in the background. It runs `npm ci`
+if Vite is missing. Open `http://127.0.0.1:5173/` for the viewer or
+`http://127.0.0.1:8000/docs` for the API. If a port is in use, choose a free one
+with `SCISSORHANDS_FRONTEND_PORT` or `SCISSORHANDS_API_PORT` when starting the
+apps. The frontend proxy follows the API port unless you set `SCISSORHANDS_API_URL`.
+
+Each launch prints its log directory under `.scissorhands/.dev/`. The launcher
+opens `backend.log` and `frontend.log` before starting either command and captures
+both stdout and stderr through shutdown. Check `launcher.log` for startup or
+process failures. `dev-down` stops the services started by this checkout and
+leaves the logs in place, including logs from failed launches.
+
+To run the services manually, start `uv run --extra api scissorhands-api` in
+one terminal and run these commands in a second:
 
 ```sh
 cd frontend
