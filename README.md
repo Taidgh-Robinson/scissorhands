@@ -459,6 +459,57 @@ it when the loop exits. Expect `state: "missing"` on older runs, while queued, b
 and after completion or cancellation. Use the run manifest for the overall outcome.
 A hard process kill can leave the last observed phase on disk.
 
+### React frontend
+
+On macOS or Linux, use these scripts with Python 3.12+, uv, and Node.js 22.13 or later:
+
+```sh
+./scripts/dev-up
+# When finished
+./scripts/dev-down
+```
+
+`dev-up` starts the reporting API and Vite in the background. It runs `npm ci`
+if Vite is missing. Open `http://127.0.0.1:5173/` for the viewer or
+`http://127.0.0.1:8000/docs` for the API. If a port is in use, choose a free one
+with `SCISSORHANDS_FRONTEND_PORT` or `SCISSORHANDS_API_PORT` when starting the
+apps. The frontend proxy follows the API port unless you set `SCISSORHANDS_API_URL`.
+
+Each launch prints its log directory under `.scissorhands/.dev/`. The launcher
+opens `backend.log` and `frontend.log` before starting either command and captures
+both stdout and stderr through shutdown. Check `launcher.log` for startup or
+process failures. `dev-down` stops the services started by this checkout and
+leaves the logs in place, including logs from failed launches.
+
+To run the services manually, start `uv run --extra api scissorhands-api` in
+one terminal and run these commands in a second:
+
+```sh
+cd frontend
+npm ci
+npm run dev
+```
+
+Open the URL printed by Vite, then select a registered project and run. The
+page shows the run outcome or the latest loop phase and verification command.
+Select a loop to read its receipt, prompt, reports, agent output, patch, and
+verification logs. Long text has previous and next page controls.
+SWR refreshes the selected run every two seconds while it is active.
+To register a local project, use the `POST /api/projects` example above.
+
+The Theme picker offers BlackChalk, BlackChalk Dark, and Plain and remembers the choice in the
+current browser. Switching themes keeps the open run, loop, and log page.
+To add another UI library, implement `ViewerTheme` from
+`frontend/src/themes/types.ts`, register the adapter in
+`frontend/src/themes/index.tsx`, and import its stylesheet in
+`frontend/src/styles.css`. Scope theme styles under the adapter's
+`[data-ui-theme]` value. The viewer owns selection and polling across themes.
+
+The development server forwards `/api` to `http://127.0.0.1:8000`. To use
+another API address, set `SCISSORHANDS_API_URL` when starting Vite. For a
+production build, run `npm run build`, serve `frontend/dist/`, and route
+`/api` on the same origin to FastAPI. Run the frontend tests with `npm test`.
+
 ### Development checks
 
 Run the full suite with the API extra installed before merging reporting changes:

@@ -1,0 +1,7 @@
+[data-ui-theme="plain"] { padding: 1rem; }
+[data-ui-theme="plain"] .masthead-inner { display: flex; flex-wrap: wrap; gap: 1rem; align-items: baseline; }
+[data-ui-theme="plain"] .theme-picker span, [data-ui-theme="plain"] .field-label { margin-right: .35rem; }
+[data-ui-theme="plain"] .brand-symbol { margin-right: .4rem; }
+[data-ui-theme="plain"] .field { display: block; margin-block: .6rem; }
+[data-ui-theme="plain"] pre { overflow: auto; max-height: 32rem; }
+[data-ui-theme="plain"] select { max-width: 100%; }
